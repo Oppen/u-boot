@@ -1,0 +1,33 @@
+if ROCKCHIP_RK3026
+
+choice
+	prompt "RK3026 board select"
+
+config TARGET_BOOX_C67ML
+	bool "ONYX BOOX C67ML Magellan"
+	select BOARD_LATE_INIT
+	help
+	  Support for the ONYX BOOX C67ML Magellan 6" e-reader and its
+	  rebrands (DOOKU, Afterglow 2, Tagus Lux, etc).  RK3026 dual-core
+	  Cortex-A9, 512 MB DDR3, 4 GB eMMC, microSD, E Ink display.
+
+endchoice
+
+config ROCKCHIP_BOOT_MODE_REG
+	default 0x200081c8
+
+config ROCKCHIP_STIMER_BASE
+	default 0x200440a0
+
+config SYS_SOC
+	default "rk3026"
+
+config SYS_MALLOC_F_LEN
+	default 0x400
+
+config SPL_SERIAL
+	default y
+
+source "board/rockchip/boox-c67ml/Kconfig"
+
+endif

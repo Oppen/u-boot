@@ -1,0 +1,98 @@
+# U-Boot defconfig — ONYX BOOX C67ML Magellan (RK3026, dual Cortex-A9)
+#
+# Modeled on the in-tree evb-rk3036 A9 board (same RK292x SPL memory layout:
+# SPL runs from internal SRAM at 0x10080000, not DRAM) with C67ML specifics:
+# UART2 console, SD/eMMC (dwmmc) boot, ACT8931 PMIC on I2C0.
+#
+# Storage note: the device's internal flash is RAW NAND behind a closed FTL
+# (no mainline driver), so real boot media is the microSD card via dwmmc.
+
+CONFIG_ARM=y
+CONFIG_SKIP_LOWLEVEL_INIT=y
+CONFIG_SPL_SKIP_LOWLEVEL_INIT=y
+CONFIG_SYS_ARCH_TIMER=y
+CONFIG_ARCH_ROCKCHIP=y
+CONFIG_TEXT_BASE=0x60000000
+CONFIG_NR_DRAM_BANKS=1
+CONFIG_HAS_CUSTOM_SYS_INIT_SP_ADDR=y
+CONFIG_CUSTOM_SYS_INIT_SP_ADDR=0x60100000
+CONFIG_DEFAULT_DEVICE_TREE="rk3026-onyx-c67ml-magellan"
+CONFIG_ROCKCHIP_RK3026=y
+CONFIG_SPL_ROCKCHIP_BACK_TO_BROM=y
+CONFIG_SPL_STACK_R_ADDR=0x80000
+CONFIG_SPL_STACK=0x10081fff
+CONFIG_SPL_TEXT_BASE=0x10081000
+# Minimal SPL, modeled on rk3036: a tiny board_init_f that inits the debug
+# UART + timer and returns to the mask ROM (back-to-BROM).  DDR is already
+# trained by the ROM's ddrbin before SPL re-entry, so no framework / malloc /
+# block layer is pulled in — keeps the SPL tiny enough for internal SRAM.
+# CONFIG_SPL_FRAMEWORK is not set
+# Back-to-BROM: the mask ROM (not the SPL) loads U-Boot proper, so the SPL
+# needs NO MMC/block/DM stack — it only inits UART+timer and returns. Keeping
+# SPL_MMC off avoids dragging in malloc_simple/bounce_buffer/part_init.
+# CONFIG_SPL_MMC is not set
+# CONFIG_SPL_BLK is not set
+# CONFIG_SPL_DM is not set
+# Keep the back-to-BROM SPL tiny: no partition/blk code (those pull part_init /
+# blk-uclass and the full DM malloc into SPL).  Mirrors evb-rk3036.
+# CONFIG_SPL_PARTITIONS is not set
+# CONFIG_SPL_DOS_PARTITION is not set
+# CONFIG_SPL_EFI_PARTITION is not set
+# CONFIG_SPL_USE_ARCH_MEMCPY is not set
+# CONFIG_SPL_USE_ARCH_MEMSET is not set
+CONFIG_SPL_LIBGENERIC_SUPPORT=y
+CONFIG_SPL_SERIAL=y
+CONFIG_SPL_STACK_R=y
+CONFIG_SYS_LOAD_ADDR=0x60800800
+CONFIG_DEBUG_UART=y
+CONFIG_DEBUG_UART_BASE=0x20068000
+CONFIG_DEBUG_UART_CLOCK=24000000
+CONFIG_DEBUG_UART_SHIFT=2
+CONFIG_DEBUG_UART_ANNOUNCE=y
+CONFIG_SYS_NS16550_MEM32=y
+CONFIG_CONSOLE_MUX=y
+CONFIG_DEFAULT_FDT_FILE="rk3026-onyx-c67ml-magellan.dtb"
+# CONFIG_DISPLAY_CPUINFO is not set
+# CONFIG_DISPLAY_BOARDINFO is not set
+CONFIG_DISPLAY_BOARDINFO_LATE=y
+# CONFIG_SPL_FRAMEWORK is not set
+CONFIG_SPL_NO_BSS_LIMIT=y
+CONFIG_SPL_HAVE_INIT_STACK=y
+CONFIG_MISC_INIT_R=y
+CONFIG_CMD_GPT=y
+CONFIG_CMD_I2C=y
+CONFIG_CMD_MMC=y
+CONFIG_CMD_USB=y
+CONFIG_CMD_USB_MASS_STORAGE=y
+CONFIG_CMD_FAT=y
+CONFIG_CMD_EXT4=y
+CONFIG_CMD_FS_GENERIC=y
+CONFIG_CMD_CACHE=y
+CONFIG_OF_CONTROL=y
+CONFIG_ENV_IS_NOWHERE=y
+CONFIG_SYSCON=y
+CONFIG_REGMAP=y
+CONFIG_CLK=y
+CONFIG_ROCKCHIP_GPIO=y
+CONFIG_PINCTRL=y
+CONFIG_DM_MMC=y
+CONFIG_MMC_DW=y
+CONFIG_MMC_DW_ROCKCHIP=y
+# CONFIG_SPL_DM_SERIAL is not set
+CONFIG_SYS_I2C_ROCKCHIP=y
+CONFIG_DM_I2C=y
+# CONFIG_SPL_DM_I2C is not set
+CONFIG_DM_PMIC=y
+# CONFIG_SPL_DM_PMIC is not set
+CONFIG_PMIC_ACT8865=y
+CONFIG_DM_REGULATOR=y
+# CONFIG_SPL_DM_REGULATOR is not set
+CONFIG_REGULATOR_ACT8865=y
+CONFIG_SYSRESET=y
+# CONFIG_SPL_SYSRESET is not set
+CONFIG_USB=y
+CONFIG_DM_USB=y
+CONFIG_USB_DWC2=y
+CONFIG_USB_STORAGE=y
+CONFIG_SPL_TINY_MEMSET=y
+CONFIG_ERRNO_STR=y

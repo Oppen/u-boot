@@ -1,0 +1,7 @@
+BOOX-C67ML
+M:	Mario Rugiero <mario.rugiero@lambdaclass.com>
+S:	Maintained
+F:	board/rockchip/boox-c67ml
+F:	include/configs/boox_c67ml.h
+F:	configs/boox_c67ml_defconfig
+F:	arch/arm/dts/rk3026-onyx-c67ml-magellan.dts

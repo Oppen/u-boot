@@ -13,6 +13,7 @@ obj-tpl-$(CONFIG_ROCKCHIP_BROM_HELPER) += bootrom.o
 obj-tpl-$(CONFIG_TPL_ROCKCHIP_COMMON_BOARD) += tpl.o spl_common.o
 obj-tpl-$(CONFIG_ROCKCHIP_PX30) += px30-board-tpl.o spl_common.o
 
+obj-spl-$(CONFIG_ROCKCHIP_RK3026) += rk3026/rk3026-board-spl.o spl_common.o
 obj-spl-$(CONFIG_ROCKCHIP_RK3036) += rk3036-board-spl.o spl_common.o
 
 ifeq ($(CONFIG_XPL_BUILD)$(CONFIG_TPL_BUILD),)
@@ -32,6 +33,7 @@ endif
 obj-$(CONFIG_$(PHASE_)RAM) += sdram.o
 
 obj-$(CONFIG_ROCKCHIP_PX30) += px30/
+obj-$(CONFIG_ROCKCHIP_RK3026) += rk3026/
 obj-$(CONFIG_ROCKCHIP_RK3036) += rk3036/
 obj-$(CONFIG_ROCKCHIP_RK3066) += rk3066/
 obj-$(CONFIG_ROCKCHIP_RK3128) += rk3128/

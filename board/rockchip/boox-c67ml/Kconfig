@@ -1,0 +1,12 @@
+if TARGET_BOOX_C67ML
+
+config SYS_BOARD
+	default "boox-c67ml"
+
+config SYS_VENDOR
+	default "rockchip"
+
+config SYS_CONFIG_NAME
+	default "boox_c67ml"
+
+endif

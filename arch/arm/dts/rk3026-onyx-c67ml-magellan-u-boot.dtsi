@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * U-Boot specific additions for the ONYX BOOX C67ML Magellan.
+ *
+ * Copyright (c) 2024, Mario Rugiero
+ *
+ * Pulls in the shared Rockchip binman image description and marks the
+ * boot-essential nodes for the pre-relocation (SPL) phase.  The board DTS
+ * already carries inline u-boot,dm-pre-reloc on uart2/emmc/sdmmc/i2c0; this
+ * overlay adds the SoC infrastructure (cru, grf, oscillator) the early DM
+ * needs before relocation.
+ */
+
+#include "rockchip-u-boot.dtsi"
+
+&cru {
+	bootph-all;
+};
+
+&grf {
+	bootph-all;
+};
+
+&xin24m {
+	bootph-all;
+};
+
+&uart2 {
+	bootph-all;
+	clock-frequency = <24000000>;
+};
+
+&emmc {
+	bootph-all;
+};
+
+&sdmmc {
+	bootph-all;
+};

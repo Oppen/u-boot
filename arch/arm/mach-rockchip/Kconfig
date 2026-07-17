@@ -24,6 +24,20 @@ config ROCKCHIP_PX30
 	  and video codec support. Peripherals include Gigabit Ethernet,
 	  USB2 host and OTG, SDIO, I2S, UART, SPI, I2C and PWMs.
 
+config ROCKCHIP_RK3026
+	bool "Support Rockchip RK3026"
+	select CPU_V7A
+	select SUPPORT_SPL
+	select SPL
+	imply SPL_SERIAL
+	imply ROCKCHIP_COMMON_BOARD
+	help
+	  The Rockchip RK3026 is a dual-core Cortex-A9 SoC (RK292x family)
+	  with Mali-400 graphics, an E Ink display controller (EBC), 512 MB
+	  DDR3, and the usual SDIO, UART, SPI, I2C and PWM peripherals.  Used
+	  in 6" e-readers such as the ONYX BOOX C67ML Magellan.  The SPL uses
+	  the Rockchip back-to-BROM flow, delegating DDR init to the mask ROM.
+
 config ROCKCHIP_RK3036
 	bool "Support Rockchip RK3036"
 	select CPU_V7A
@@ -778,6 +792,7 @@ config NR_DRAM_BANKS
 	default 10 if ROCKCHIP_EXTERNAL_TPL
 
 source "arch/arm/mach-rockchip/px30/Kconfig"
+source "arch/arm/mach-rockchip/rk3026/Kconfig"
 source "arch/arm/mach-rockchip/rk3036/Kconfig"
 source "arch/arm/mach-rockchip/rk3066/Kconfig"
 source "arch/arm/mach-rockchip/rk3128/Kconfig"
