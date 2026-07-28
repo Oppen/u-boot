@@ -6,9 +6,9 @@
  *
  * Based on rk3066.c / rk3036.c by the Rockchip U-Boot maintainers.
  *
- * The Rockchip boot ROM loads the SPL at eMMC sector 0x40 (or SD sector 0),
- * runs the DDR init code (ddrbin) via the back-to-BROM flow, then re-enters
- * the SPL which loads U-Boot proper.  No explicit DDR init lives here.
+ * The Rockchip boot ROM loads the SPL from LBA 64 of the boot medium (SD or
+ * eMMC alike), the SPL initialises DRAM (sdram_rk3026.c) and returns to the
+ * ROM, which then loads U-Boot proper into DRAM.
  */
 
 #include <dm.h>
@@ -36,10 +36,10 @@ const char * const boot_devices[BROM_LAST_BOOTSOURCE + 1] = {
 void board_debug_uart_init(void)
 {
 	/*
-	 * Route GPIO1B[3:2] to UART2 (FUNC2) so the SPL/early console has
-	 * output before pinctrl is up.  GRF_GPIO1B_IOMUX is hiword-masked.
+	 * Route GPIO2_C6/C7 to UART2_SIN/SOUT (FUNC3) so the SPL has output
+	 * before pinctrl is up.  GRF_GPIO2C_IOMUX is hiword-masked.
 	 */
-	writel(IOMUX_UART2, (void __iomem *)(GRF_BASE + GRF_GPIO1B_IOMUX));
+	writel(IOMUX_UART2, (void __iomem *)(GRF_BASE + GRF_GPIO2C_IOMUX));
 }
 
 int rockchip_get_clk(struct udevice **devp)

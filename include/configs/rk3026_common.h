@@ -28,7 +28,17 @@
 	"kernel_addr_r=0x62000000\0" \
 	"ramdisk_addr_r=0x64000000\0"
 
+/*
+ * stdout/stderr/stdin are muxed onto both the UART and the USB CDC-ACM gadget.
+ * The UART is unreachable on this board without soldering to the LQFP176 leads,
+ * so in practice the ACM device -- /dev/cu.usbmodem* on the host -- is the
+ * console. CONFIG_PRE_CONSOLE_BUFFER holds everything printed before USB
+ * enumerates and replays it once the port opens, so nothing early is lost.
+ */
 #define CFG_EXTRA_ENV_SETTINGS \
+	"stdout=serial,usbacm\0" \
+	"stderr=serial,usbacm\0" \
+	"stdin=serial,usbacm\0" \
 	"fdt_file=" CONFIG_DEFAULT_FDT_FILE "\0" \
 	"fdt_high=0x7fffffff\0" \
 	"partitions=" PARTS_DEFAULT \

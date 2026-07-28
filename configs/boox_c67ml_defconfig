@@ -6,11 +6,15 @@
 #
 # Storage note: the device's internal flash is RAW NAND behind a closed FTL
 # (no mainline driver), so real boot media is the microSD card via dwmmc.
+#
+# RK3026 is Cortex-A9: no ARM architected generic timer (CONFIG_SYS_ARCH_TIMER
+# must stay off), so U-Boot proper uses the DM Rockchip timer and the SPL uses
+# a local __udelay() over the same timer (rk3026-board-spl.c).
 
 CONFIG_ARM=y
 CONFIG_SKIP_LOWLEVEL_INIT=y
 CONFIG_SPL_SKIP_LOWLEVEL_INIT=y
-CONFIG_SYS_ARCH_TIMER=y
+# CONFIG_SYS_ARCH_TIMER is not set
 CONFIG_ARCH_ROCKCHIP=y
 CONFIG_TEXT_BASE=0x60000000
 CONFIG_NR_DRAM_BANKS=1
@@ -21,11 +25,22 @@ CONFIG_ROCKCHIP_RK3026=y
 CONFIG_SPL_ROCKCHIP_BACK_TO_BROM=y
 CONFIG_SPL_STACK_R_ADDR=0x80000
 CONFIG_SPL_STACK=0x10081fff
-CONFIG_SPL_TEXT_BASE=0x10081000
+# Payload byte 0 lands at 0x10080800, and mkimage OVERWRITES bytes 0..3 with
+# the "RK30" tag, so the first linked word is sacrificial — boot0.h reserves it
+# ("b 1f"). The BROM then branches to a fixed 0x10080804. Linking at 0x...804
+# instead skews every absolute word by 4 and fails silently. (BROM disassembly.)
+CONFIG_SPL_TEXT_BASE=0x10080800
+# IRAM window is 0x10080800..0x10082000 = 6144 B, shared by the image and the
+# downward-growing SPL_STACK at 0x10081fff.  Ceiling = 6144 - 1536 B of stack
+# reserve.  Without this the overrun is silent: the image grows into the stack
+# and DRAM training corrupts itself.
+CONFIG_SPL_MAX_SIZE=0x1200
 # Minimal SPL, modeled on rk3036: a tiny board_init_f that inits the debug
-# UART + timer and returns to the mask ROM (back-to-BROM).  DDR is already
-# trained by the ROM's ddrbin before SPL re-entry, so no framework / malloc /
-# block layer is pulled in — keeps the SPL tiny enough for internal SRAM.
+# UART + timer, brings up DRAM, and returns to the mask ROM (back-to-BROM).
+# The BROM never touches the DDR controller and leaves the PLLs bypassed at
+# 24MHz, so sdram_init() here is what trains DRAM — hence SPL_STACK must stay
+# in SRAM.  No framework / malloc / block layer is pulled in, which keeps the
+# SPL small enough for internal SRAM.
 # CONFIG_SPL_FRAMEWORK is not set
 # Back-to-BROM: the mask ROM (not the SPL) loads U-Boot proper, so the SPL
 # needs NO MMC/block/DM stack — it only inits UART+timer and returns. Keeping
@@ -49,6 +64,9 @@ CONFIG_DEBUG_UART_BASE=0x20068000
 CONFIG_DEBUG_UART_CLOCK=24000000
 CONFIG_DEBUG_UART_SHIFT=2
 CONFIG_DEBUG_UART_ANNOUNCE=y
+# The raw debug-UART driver does no pinmux: board_debug_uart_init() in
+# mach-rockchip/rk3026/rk3026.c muxes GPIO2_C6/C7 to UART2 (FUNC3) first.
+CONFIG_DEBUG_UART_BOARD_INIT=y
 CONFIG_SYS_NS16550_MEM32=y
 CONFIG_CONSOLE_MUX=y
 CONFIG_DEFAULT_FDT_FILE="rk3026-onyx-c67ml-magellan.dtb"
@@ -58,6 +76,11 @@ CONFIG_DISPLAY_BOARDINFO_LATE=y
 # CONFIG_SPL_FRAMEWORK is not set
 CONFIG_SPL_NO_BSS_LIMIT=y
 CONFIG_SPL_HAVE_INIT_STACK=y
+# Staged LED progress signal (no serial console yet): blink count = milestone,
+# emitted from board_early_init_f / dram_init / misc_init_r, plus an
+# EVT_LAST_STAGE_INIT spy (board_late_init is taken by mach-rockchip/board.c).
+CONFIG_BOARD_EARLY_INIT_F=y
+CONFIG_LAST_STAGE_INIT=y
 CONFIG_MISC_INIT_R=y
 CONFIG_CMD_GPT=y
 CONFIG_CMD_I2C=y
@@ -73,6 +96,10 @@ CONFIG_ENV_IS_NOWHERE=y
 CONFIG_SYSCON=y
 CONFIG_REGMAP=y
 CONFIG_CLK=y
+# Cortex-A9 has no arch timer: use the Rockchip DM timer in U-Boot proper.
+CONFIG_SYS_TIMER_COUNTS_DOWN=y
+CONFIG_TIMER=y
+CONFIG_ROCKCHIP_TIMER=y
 CONFIG_ROCKCHIP_GPIO=y
 CONFIG_PINCTRL=y
 CONFIG_DM_MMC=y
@@ -94,5 +121,26 @@ CONFIG_USB=y
 CONFIG_DM_USB=y
 CONFIG_USB_DWC2=y
 CONFIG_USB_STORAGE=y
+# Recovery here is rockusb/maskrom, not fastboot.  Leaving it on also costs
+# U-Boot proper the gadget + flash backends for a protocol nothing uses.
+# CONFIG_USB_FUNCTION_FASTBOOT is not set
+# CONFIG_CMD_FASTBOOT is not set
 CONFIG_SPL_TINY_MEMSET=y
 CONFIG_ERRNO_STR=y
+
+# USB CDC-ACM console. The OTG controller (usb@10180000, dwc2) is the only
+# bidirectional channel this board has without soldering to the UART leads.
+# PRE_CONSOLE_BUFFER matters as much as the gadget itself: USB cannot enumerate
+# until late in board_init_r, so without it every message from before that point
+# would be lost -- which is exactly the part worth reading.
+CONFIG_USB_GADGET=y
+CONFIG_USB_GADGET_MANUFACTURER="ONYX"
+CONFIG_USB_GADGET_VENDOR_NUM=0x2207
+CONFIG_USB_GADGET_PRODUCT_NUM=0x0010
+CONFIG_USB_GADGET_DWC2_OTG=y
+CONFIG_USB_FUNCTION_ACM=y
+CONFIG_CONSOLE_MUX=y
+CONFIG_SYS_CONSOLE_IS_IN_ENV=y
+CONFIG_PRE_CONSOLE_BUFFER=y
+CONFIG_PRE_CON_BUF_ADDR=0x60f00000
+CONFIG_PRE_CON_BUF_SZ=8192

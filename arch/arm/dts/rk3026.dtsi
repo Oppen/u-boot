@@ -81,15 +81,12 @@
 		interrupt-affinity = <&cpu0>, <&cpu1>;
 	};
 
-	timer {
-		compatible = "arm,armv7-timer";
-		interrupts = <GIC_PPI 13 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_HIGH)>,
-			     <GIC_PPI 14 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_HIGH)>,
-			     <GIC_PPI 11 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_HIGH)>,
-			     <GIC_PPI 10 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_HIGH)>;
-		clock-frequency = <24000000>;
-		arm,cpu-registers-not-fw-configured;
-	};
+	/*
+	 * No "arm,armv7-timer" node: RK3026 is Cortex-A9, which has no ARM
+	 * architected generic timer (that is ARMv7VE / Cortex-A7 and later).
+	 * Timekeeping comes from the Cortex-A9 global/TWD timers above and the
+	 * Rockchip timer at 0x20044000 below.
+	 */
 
 	xin24m: oscillator {
 		compatible = "fixed-clock";
@@ -577,145 +574,175 @@
 		};
 
 		uart0 {
+			/* GPIO0_C0 = UART0_SOUT, GPIO0_C1 = UART0_SIN, FUNC1 */
 			uart0_xfer: uart0-xfer {
-				rockchip,pins = <RK_GPIO1 8 RK_FUNC_1 &pcfg_pull_default>,
-						<RK_GPIO1 9 RK_FUNC_1 &pcfg_pull_default>;
+				rockchip,pins = <0 16 1 &pcfg_pull_default>,
+						<0 17 1 &pcfg_pull_default>;
 			};
 		};
 
 		uart1 {
+			/*
+			 * GPIO1_B1 = UART1_SOUT, GPIO1_B2 = UART1_SIN, FUNC2.
+			 * FUNC1 on the same pins is SPI0_TXD/RXD.
+			 */
 			uart1_xfer: uart1-xfer {
-				rockchip,pins = <RK_GPIO1 10 RK_FUNC_1 &pcfg_pull_default>,
-						<RK_GPIO1 11 RK_FUNC_1 &pcfg_pull_default>;
+				rockchip,pins = <1 9 2 &pcfg_pull_default>,
+						<1 10 2 &pcfg_pull_default>;
 			};
 		};
 
 		uart2 {
+			/*
+			 * GPIO2_C6 = UART2_SIN, GPIO2_C7 = UART2_SOUT, FUNC3.
+			 * FUNC2 on the same pins is EBC_BORDER0/1, so the serial
+			 * console and the EBC border pins are mutually exclusive.
+			 */
 			uart2_xfer: uart2-xfer {
-				rockchip,pins = <RK_GPIO1 18 RK_FUNC_2 &pcfg_pull_default>,
-						<RK_GPIO1 19 RK_FUNC_2 &pcfg_pull_default>;
+				rockchip,pins = <2 22 3 &pcfg_pull_default>,
+						<2 23 3 &pcfg_pull_default>;
 			};
 		};
 
 		i2c0 {
 			i2c0_xfer: i2c0-xfer {
-				rockchip,pins = <RK_GPIO0 0 RK_FUNC_1 &pcfg_pull_none>,
-						<RK_GPIO0 1 RK_FUNC_1 &pcfg_pull_none>;
+				rockchip,pins = <0 0 1 &pcfg_pull_none>,
+						<0 1 1 &pcfg_pull_none>;
 			};
 		};
 
 		i2c1 {
 			i2c1_xfer: i2c1-xfer {
-				rockchip,pins = <RK_GPIO0 2 RK_FUNC_1 &pcfg_pull_none>,
-						<RK_GPIO0 3 RK_FUNC_1 &pcfg_pull_none>;
+				rockchip,pins = <0 2 1 &pcfg_pull_none>,
+						<0 3 1 &pcfg_pull_none>;
 			};
 		};
 
 		i2c2 {
+			/* GPIO2_C4 = I2C2_SDA, GPIO2_C5 = I2C2_SCL, FUNC3 */
 			i2c2_xfer: i2c2-xfer {
-				rockchip,pins = <RK_GPIO2 20 RK_FUNC_1 &pcfg_pull_none>,
-						<RK_GPIO2 21 RK_FUNC_1 &pcfg_pull_none>;
+				rockchip,pins = <2 20 3 &pcfg_pull_none>,
+						<2 21 3 &pcfg_pull_none>;
 			};
 		};
 
 		i2c3 {
 			i2c3_xfer: i2c3-xfer {
-				rockchip,pins = <RK_GPIO0 6 RK_FUNC_1 &pcfg_pull_none>,
-						<RK_GPIO0 7 RK_FUNC_1 &pcfg_pull_none>;
+				rockchip,pins = <0 6 1 &pcfg_pull_none>,
+						<0 7 1 &pcfg_pull_none>;
 			};
 		};
 
 		spi {
+			/* SPI0: GPIO1_B0 CLK, B1 TXD, B2 RXD, B3 CS0, all FUNC1 */
+			spi_clk: spi-clk {
+				rockchip,pins = <1 8 1 &pcfg_pull_default>;
+			};
 			spi_txd: spi-txd {
-				rockchip,pins = <RK_GPIO1 29 RK_FUNC_3 &pcfg_pull_default>;
+				rockchip,pins = <1 9 1 &pcfg_pull_default>;
 			};
 			spi_rxd: spi-rxd {
-				rockchip,pins = <RK_GPIO1 28 RK_FUNC_3 &pcfg_pull_default>;
-			};
-			spi_clk: spi-clk {
-				rockchip,pins = <RK_GPIO1 30 RK_FUNC_3 &pcfg_pull_default>;
+				rockchip,pins = <1 10 1 &pcfg_pull_default>;
 			};
 			spi_cs0: spi-cs0 {
-				rockchip,pins = <RK_GPIO1 31 RK_FUNC_3 &pcfg_pull_default>;
+				rockchip,pins = <1 11 1 &pcfg_pull_default>;
 			};
 		};
 
 		pwm0 {
+			/* GPIO0_D2, FUNC1 */
 			pwm0_pin: pwm0-pin {
-				rockchip,pins = <RK_GPIO0 0 RK_FUNC_2 &pcfg_pull_none>;
+				rockchip,pins = <0 26 1 &pcfg_pull_none>;
 			};
 		};
 
 		pwm1 {
+			/* GPIO0_D3, FUNC1 */
 			pwm1_pin: pwm1-pin {
-				rockchip,pins = <RK_GPIO0 1 RK_FUNC_2 &pcfg_pull_none>;
+				rockchip,pins = <0 27 1 &pcfg_pull_none>;
 			};
 		};
 
 		pwm2 {
+			/* GPIO0_D4, FUNC1 */
 			pwm2_pin: pwm2-pin {
-				rockchip,pins = <RK_GPIO0 1 2 &pcfg_pull_none>;
+				rockchip,pins = <0 28 1 &pcfg_pull_none>;
 			};
 		};
 
 		sdmmc {
-			sdmmc_clk: sdmmc-clk {
-				rockchip,pins = <RK_GPIO3 2 RK_FUNC_1 &pcfg_pull_none>;
-			};
+			/*
+			 * MMC0 (microSD): GPIO1_B7 CMD, GPIO1_C0 CLKOUT,
+			 * GPIO1_C1 DETN, GPIO1_C2..C5 D0..D3, all FUNC1.
+			 * Note D2/D3 double as JTAG_TCK/TMS when card-detect is
+			 * inactive.
+			 */
 			sdmmc_cmd: sdmmc-cmd {
-				rockchip,pins = <RK_GPIO3 3 RK_FUNC_1 &pcfg_pull_default>;
+				rockchip,pins = <1 15 1 &pcfg_pull_default>;
+			};
+			sdmmc_clk: sdmmc-clk {
+				rockchip,pins = <1 16 1 &pcfg_pull_none>;
 			};
 			sdmmc_cd: sdmmc-cd {
-				rockchip,pins = <RK_GPIO3 8 RK_FUNC_1 &pcfg_pull_default>;
+				rockchip,pins = <1 17 1 &pcfg_pull_default>;
 			};
 			sdmmc_bus4: sdmmc-bus4 {
-				rockchip,pins = <RK_GPIO3 4 RK_FUNC_1 &pcfg_pull_default>,
-						<RK_GPIO3 5 RK_FUNC_1 &pcfg_pull_default>,
-						<RK_GPIO3 6 RK_FUNC_1 &pcfg_pull_default>,
-						<RK_GPIO3 7 RK_FUNC_1 &pcfg_pull_default>;
+				rockchip,pins = <1 18 1 &pcfg_pull_default>,
+						<1 19 1 &pcfg_pull_default>,
+						<1 20 1 &pcfg_pull_default>,
+						<1 21 1 &pcfg_pull_default>;
 			};
 		};
 
 		sdio {
-			sdio_clk: sdio-clk {
-				rockchip,pins = <RK_GPIO3 2 RK_FUNC_1 &pcfg_pull_none>;
-			};
+			/*
+			 * MMC1 (SDIO): GPIO0_B0 CMD, B1 CLKOUT, B2 DETN,
+			 * B3..B6 D0..D3, all FUNC1.
+			 */
 			sdio_cmd: sdio-cmd {
-				rockchip,pins = <RK_GPIO3 3 RK_FUNC_1 &pcfg_pull_default>;
+				rockchip,pins = <0 8 1 &pcfg_pull_default>;
+			};
+			sdio_clk: sdio-clk {
+				rockchip,pins = <0 9 1 &pcfg_pull_none>;
 			};
 			sdio_bus4: sdio-bus4 {
-				rockchip,pins = <RK_GPIO3 4 RK_FUNC_1 &pcfg_pull_default>,
-						<RK_GPIO3 5 RK_FUNC_1 &pcfg_pull_default>,
-						<RK_GPIO3 6 RK_FUNC_1 &pcfg_pull_default>,
-						<RK_GPIO3 7 RK_FUNC_1 &pcfg_pull_default>;
+				rockchip,pins = <0 11 1 &pcfg_pull_default>,
+						<0 12 1 &pcfg_pull_default>,
+						<0 13 1 &pcfg_pull_default>,
+						<0 14 1 &pcfg_pull_default>;
 			};
 		};
 
 		i2s {
 			i2s_pins: i2s-pins {
-				rockchip,pins = <RK_GPIO1 0 RK_FUNC_1 &pcfg_pull_none>,  /* i2s_sclk */
-						<RK_GPIO1 1 RK_FUNC_1 &pcfg_pull_none>,  /* i2s_lrck */
-						<RK_GPIO1 2 RK_FUNC_1 &pcfg_pull_none>,  /* i2s_sdi */
-						<RK_GPIO1 3 RK_FUNC_1 &pcfg_pull_none>;  /* i2s_sdo */
+				rockchip,pins = <1 0 1 &pcfg_pull_none>,  /* i2s_sclk */
+						<1 1 1 &pcfg_pull_none>,  /* i2s_lrck */
+						<1 2 1 &pcfg_pull_none>,  /* i2s_sdi */
+						<1 3 1 &pcfg_pull_none>;  /* i2s_sdo */
 			};
 		};
 
 		emmc {
+			/*
+			 * GPIO2_A7 CLKOUT and GPIO1_C6 CMD are the FUNC2
+			 * alternates of NAND_DQS / NAND_CS2 (this board has NAND
+			 * populated, so these groups are mutually exclusive).
+			 */
 			emmc_clk: emmc-clk {
-				rockchip,pins = <RK_GPIO2 7 RK_FUNC_1 &pcfg_pull_none>;
+				rockchip,pins = <2 7 2 &pcfg_pull_none>;
 			};
 			emmc_cmd: emmc-cmd {
-				rockchip,pins = <RK_GPIO2 4 RK_FUNC_2 &pcfg_pull_default>;
+				rockchip,pins = <1 22 2 &pcfg_pull_default>;
 			};
 			emmc_bus8: emmc-bus8 {
-				rockchip,pins = <RK_GPIO1 24 RK_FUNC_2 &pcfg_pull_default>,
-						<RK_GPIO1 25 RK_FUNC_2 &pcfg_pull_default>,
-						<RK_GPIO1 26 RK_FUNC_2 &pcfg_pull_default>,
-						<RK_GPIO1 27 RK_FUNC_2 &pcfg_pull_default>,
-						<RK_GPIO1 28 RK_FUNC_2 &pcfg_pull_default>,
-						<RK_GPIO1 29 RK_FUNC_2 &pcfg_pull_default>,
-						<RK_GPIO1 30 RK_FUNC_2 &pcfg_pull_default>,
-						<RK_GPIO1 31 RK_FUNC_2 &pcfg_pull_default>;
+				rockchip,pins = <1 24 2 &pcfg_pull_default>,
+						<1 25 2 &pcfg_pull_default>,
+						<1 26 2 &pcfg_pull_default>,
+						<1 27 2 &pcfg_pull_default>,
+						<1 28 2 &pcfg_pull_default>,
+						<1 29 2 &pcfg_pull_default>,
+						<1 30 2 &pcfg_pull_default>,
+						<1 31 2 &pcfg_pull_default>;
 			};
 		};
 
@@ -729,32 +756,32 @@
 		 */
 		nfc {
 			flash_ale: flash-ale {
-				rockchip,pins = <RK_GPIO2 0 RK_FUNC_1 &pcfg_pull_default>;
+				rockchip,pins = <2 0 1 &pcfg_pull_default>;
 			};
 			flash_cle: flash-cle {
-				rockchip,pins = <RK_GPIO2 1 RK_FUNC_1 &pcfg_pull_default>;
+				rockchip,pins = <2 1 1 &pcfg_pull_default>;
 			};
 			flash_wrn: flash-wrn {
-				rockchip,pins = <RK_GPIO2 2 RK_FUNC_1 &pcfg_pull_default>;
+				rockchip,pins = <2 2 1 &pcfg_pull_default>;
 			};
 			flash_rdn: flash-rdn {
-				rockchip,pins = <RK_GPIO2 3 RK_FUNC_1 &pcfg_pull_default>;
+				rockchip,pins = <2 3 1 &pcfg_pull_default>;
 			};
 			flash_rdy: flash-rdy {
-				rockchip,pins = <RK_GPIO2 4 RK_FUNC_1 &pcfg_pull_default>;
+				rockchip,pins = <2 4 1 &pcfg_pull_default>;
 			};
 			flash_csn0: flash-csn0 {
-				rockchip,pins = <RK_GPIO2 6 RK_FUNC_1 &pcfg_pull_default>;
+				rockchip,pins = <2 6 1 &pcfg_pull_default>;
 			};
 			flash_bus8: flash-bus8 {
-				rockchip,pins = <RK_GPIO1 24 RK_FUNC_1 &pcfg_pull_default>,
-						<RK_GPIO1 25 RK_FUNC_1 &pcfg_pull_default>,
-						<RK_GPIO1 26 RK_FUNC_1 &pcfg_pull_default>,
-						<RK_GPIO1 27 RK_FUNC_1 &pcfg_pull_default>,
-						<RK_GPIO1 28 RK_FUNC_1 &pcfg_pull_default>,
-						<RK_GPIO1 29 RK_FUNC_1 &pcfg_pull_default>,
-						<RK_GPIO1 30 RK_FUNC_1 &pcfg_pull_default>,
-						<RK_GPIO1 31 RK_FUNC_1 &pcfg_pull_default>;
+				rockchip,pins = <1 24 1 &pcfg_pull_default>,
+						<1 25 1 &pcfg_pull_default>,
+						<1 26 1 &pcfg_pull_default>,
+						<1 27 1 &pcfg_pull_default>,
+						<1 28 1 &pcfg_pull_default>,
+						<1 29 1 &pcfg_pull_default>,
+						<1 30 1 &pcfg_pull_default>,
+						<1 31 1 &pcfg_pull_default>;
 			};
 		};
 	};

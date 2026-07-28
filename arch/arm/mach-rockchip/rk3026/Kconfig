@@ -9,15 +9,33 @@ config TARGET_BOOX_C67ML
 	help
 	  Support for the ONYX BOOX C67ML Magellan 6" e-reader and its
 	  rebrands (DOOKU, Afterglow 2, Tagus Lux, etc).  RK3026 dual-core
-	  Cortex-A9, 512 MB DDR3, 4 GB eMMC, microSD, E Ink display.
+	  Cortex-A9, 512 MB DDR3, 4 GB raw NAND (closed FTL, unusable by
+	  mainline), microSD, E Ink display.
 
 endchoice
 
 config ROCKCHIP_BOOT_MODE_REG
-	default 0x200081c8
+	# GRF_OS_REG5 (GRF + 0x1dc): the register the vendor kernel uses for the
+	# Linux-side boot mode (mach-rk3026/reset.c; OS_REG4 at 0x1d8 is the
+	# loader-side one).  rk3036's 0x1c8 (OS_REG0) does not apply here.
+	default 0x200081dc
 
 config ROCKCHIP_STIMER_BASE
-	default 0x200440a0
+	hex
+	default 0x20044000
+	help
+	  Timer0. Timers are 0x20 apart, so this block holds timer0 at +0x00 and
+	  timer1 at +0x20; +0x40 upwards reads as zero on this SoC.
+
+	  rk3036's 0x200440a0 ("timer5") does not exist here -- that whole window
+	  reads 0x00000000 on a live device. It was inherited from rk3036, whose
+	  timer count differs, and produced the bogus "24 MHz / 64 = 375 kHz"
+	  figure this entry used to carry.
+
+	  The vendor MiniLoader programs exactly this base: load_count0 =
+	  0xffffffff at +0x00, ctrl = 1 at +0x10, counter read at +0x08, result
+	  inverted (down-counter), then scaled count*5/120 = count/24 -- i.e.
+	  24 MHz. Measured on hardware: 24,000,665 Hz.
 
 config SYS_SOC
 	default "rk3026"

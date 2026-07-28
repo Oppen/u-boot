@@ -3,3 +3,4 @@
 # Copyright (c) 2024, Mario Rugiero
 
 obj-y += boox-c67ml.o
+obj-y += sdram_config.o

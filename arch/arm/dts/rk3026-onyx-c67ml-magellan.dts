@@ -467,42 +467,42 @@
 &pinctrl {
 	leds {
 		led_pins: led-pins {
-			rockchip,pins = <RK_GPIO1 14 RK_FUNC_GPIO &pcfg_pull_none>,
-					<RK_GPIO1 15 RK_FUNC_GPIO &pcfg_pull_none>;
+			rockchip,pins = <1 14 0 &pcfg_pull_none>,
+					<1 15 0 &pcfg_pull_none>;
 		};
 	};
 
 	buttons {
 		pwrbtn: pwrbtn {
-			rockchip,pins = <RK_GPIO1 2 RK_FUNC_GPIO &pcfg_pull_up>;
+			rockchip,pins = <1 2 0 &pcfg_pull_up>;
 		};
 	};
 
 	backlight {
 		bl_en: bl-en {
-			rockchip,pins = <RK_GPIO1 1 RK_FUNC_GPIO &pcfg_pull_none>;
+			rockchip,pins = <1 1 0 &pcfg_pull_none>;
 		};
 	};
 
 	usb {
 		host_vbus_drv: host-vbus-drv {
-			rockchip,pins = <RK_GPIO0 6 RK_FUNC_GPIO &pcfg_pull_none>;
+			rockchip,pins = <0 6 0 &pcfg_pull_none>;
 		};
 	};
 
 	touchscreen {
 		touch_int: touch-int {
-			rockchip,pins = <RK_GPIO1 8 RK_FUNC_GPIO &pcfg_pull_up>;
+			rockchip,pins = <1 8 0 &pcfg_pull_up>;
 		};
 
 		touch_rst: touch-rst {
-			rockchip,pins = <RK_GPIO2 12 RK_FUNC_GPIO &pcfg_pull_none>;
+			rockchip,pins = <2 12 0 &pcfg_pull_none>;
 		};
 	};
 
 	pmic {
 		pmu_int: pmu-int {
-			rockchip,pins = <RK_GPIO1 9 RK_FUNC_GPIO &pcfg_pull_up>;
+			rockchip,pins = <1 9 0 &pcfg_pull_up>;
 		};
 	};
 
@@ -510,32 +510,32 @@
 		/* wake_up = RK30_PIN3_PC1 = GPIO3 pin 17
 		 * vcom_ctl = RK30_PIN2_PC0 = GPIO2 pin 16 */
 		tps65185_pins: tps65185-pins {
-			rockchip,pins = <RK_GPIO3 17 RK_FUNC_GPIO &pcfg_pull_none>,
-					<RK_GPIO2 16 RK_FUNC_GPIO &pcfg_pull_none>;
+			rockchip,pins = <3 17 0 &pcfg_pull_none>,
+					<2 16 0 &pcfg_pull_none>;
 		};
 	};
 
 	rtc {
 		/* RTC_INT_PIN = RK30_PIN1_PB3 = GPIO1 pin 11 */
 		rtc_int: rtc-int {
-			rockchip,pins = <RK_GPIO1 11 RK_FUNC_GPIO &pcfg_pull_up>;
+			rockchip,pins = <1 11 0 &pcfg_pull_up>;
 		};
 	};
 
 	headphone {
 		/* RK30_PIN1_PA5 = GPIO1 pin 5 */
 		hp_det: hp-det {
-			rockchip,pins = <RK_GPIO1 5 RK_FUNC_GPIO &pcfg_pull_none>;
+			rockchip,pins = <1 5 0 &pcfg_pull_none>;
 		};
 	};
 
 	keys {
 		pageup_btn: pageup-btn {
-			rockchip,pins = <RK_GPIO0 3 RK_FUNC_GPIO &pcfg_pull_up>;
+			rockchip,pins = <0 3 0 &pcfg_pull_up>;
 		};
 
 		pagedown_btn: pagedown-btn {
-			rockchip,pins = <RK_GPIO0 2 RK_FUNC_GPIO &pcfg_pull_up>;
+			rockchip,pins = <0 2 0 &pcfg_pull_up>;
 		};
 	};
 };
