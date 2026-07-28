@@ -592,6 +592,39 @@ static int run_main_loop(void)
  * TODO: perhaps reset the watchdog in the initcall function after each call?
  */
 
+/*
+ * BOOX step probes (-DUBOOT_CURRENT_STEP=N via KCFLAGS). Instrumentation only.
+ * Step 7 (dram_init) blinks on hardware and step 8 (misc_init_r) does not, so
+ * the failure is in relocation or the early half of board_init_r. Blinks
+ * forever off a raw spin: no timer, no delay primitive, positive signal.
+ */
+#ifdef UBOOT_CURRENT_STEP
+static void boox_r_blink(void)
+{
+	volatile u32 i;
+
+	writel(BIT(11 + 16), (void __iomem *)0x200000f0);
+	setbits_le32((void __iomem *)(0x20084000 + 0x04), BIT(15));
+	/*
+	 * 5,000,000, not 100,000: these markers run after initr_caches, where the
+	 * same loop is orders of magnitude faster than in the uncached SPL. At
+	 * 100,000 step 31 was "almost invisible" -- and a blink that fast reads as
+	 * a steady dim LED, i.e. it would be misreported as "not reached".
+	 */
+	while (1) {
+		setbits_le32((void __iomem *)0x20084000, BIT(15));
+		for (i = 0; i < 5000000; i++)
+			;
+		clrbits_le32((void __iomem *)0x20084000, BIT(15));
+		for (i = 0; i < 5000000; i++)
+			;
+	}
+}
+#define BOOX_R_STEP(n)	do { if ((n) == UBOOT_CURRENT_STEP) boox_r_blink(); } while (0)
+#else
+#define BOOX_R_STEP(n)	do { } while (0)
+#endif
+
 static void initcall_run_r(void)
 {
 	/*
@@ -600,10 +633,12 @@ static void initcall_run_r(void)
 	 */
 	INITCALL(initr_trace);
 	INITCALL(initr_reloc);
+	BOOX_R_STEP(29);		/* relocation survived: we are running from the relocated image */
 	INITCALL(event_init);
 	/* TODO: could x86/PPC have this also perhaps? */
 #if CONFIG_IS_ENABLED(ARM) || CONFIG_IS_ENABLED(RISCV)
 	INITCALL(initr_caches);
+	BOOX_R_STEP(30);		/* caches/MMU enabled */
 	/* Note: For Freescale LS2 SoCs, new MMU table is created in DDR.
 	 *	 A temporary mapping of IFC high region is since removed,
 	 *	 so environmental variables in NOR flash is not available
@@ -617,6 +652,7 @@ static void initcall_run_r(void)
 #endif
 	INITCALL(initr_barrier);
 	INITCALL(initr_malloc);
+	BOOX_R_STEP(31);		/* full malloc arena up */
 	INITCALL(log_init);
 	INITCALL(initr_bootstage); /* Needs malloc() but has its own timer */
 #if CONFIG_IS_ENABLED(CONSOLE_RECORD)
@@ -628,12 +664,14 @@ static void initcall_run_r(void)
 	INITCALL(initr_of_live);
 #if CONFIG_IS_ENABLED(DM)
 	INITCALL(initr_dm);
+	BOOX_R_STEP(32);		/* post-reloc driver model up */
 #endif
 #if CONFIG_IS_ENABLED(ADDR_MAP)
 	INITCALL(init_addr_map);
 #endif
 #if CONFIG_IS_ENABLED(BOARD_INIT)
-	INITCALL(board_init);	/* Setup chipselects */
+	INITCALL(board_init);
+	BOOX_R_STEP(33);		/* board_init done */	/* Setup chipselects */
 #endif
 	/*
 	 * TODO: printing of the clock inforamtion of the board is now
@@ -657,6 +695,7 @@ static void initcall_run_r(void)
 	INITCALL(initr_dm_devices);
 	INITCALL(stdio_init_tables);
 	INITCALL(serial_initialize);
+	BOOX_R_STEP(35);		/* serial_initialize done */
 	INITCALL(initr_announce);
 	INITCALL(dm_announce);
 #if CONFIG_IS_ENABLED(WDT)
@@ -682,7 +721,9 @@ static void initcall_run_r(void)
 #if CONFIG_IS_ENABLED(ARCH_EARLY_INIT_R)
 	INITCALL(arch_early_init_r);
 #endif
+	BOOX_R_STEP(39);		/* about to call power_init_board */
 	INITCALL(power_init_board);
+	BOOX_R_STEP(36);		/* power_init_board done (ACT8931 PMIC on I2C0) */
 #if CONFIG_IS_ENABLED(MTD_NOR_FLASH)
 	INITCALL(initr_flash);
 #endif
@@ -702,6 +743,7 @@ static void initcall_run_r(void)
 #endif
 #if CONFIG_IS_ENABLED(MMC)
 	INITCALL(initr_mmc);
+	BOOX_R_STEP(37);		/* MMC subsystem up (dwmmc probe) */
 #endif
 #if CONFIG_IS_ENABLED(XEN)
 	INITCALL(xen_init);
@@ -710,6 +752,7 @@ static void initcall_run_r(void)
 	INITCALL(initr_pvblock);
 #endif
 	INITCALL(initr_env);
+	BOOX_R_STEP(38);		/* environment loaded */
 #if CONFIG_IS_ENABLED(SYS_MALLOC_BOOTPARAMS)
 	INITCALL(initr_malloc_bootparams);
 #endif
@@ -731,7 +774,8 @@ static void initcall_run_r(void)
 #if CONFIG_IS_ENABLED(API)
 	INITCALL(api_init);
 #endif
-	INITCALL(console_init_r);	/* fully init console as a device */
+	INITCALL(console_init_r);
+	BOOX_R_STEP(34);		/* console fully initialised */	/* fully init console as a device */
 #if CONFIG_IS_ENABLED(DISPLAY_BOARDINFO_LATE)
 	INITCALL(console_announce_r);
 	INITCALL(show_board_info);

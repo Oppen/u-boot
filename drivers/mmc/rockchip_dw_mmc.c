@@ -108,8 +108,39 @@ static int rockchip_dwmmc_of_to_plat(struct udevice *dev)
 	return 0;
 }
 
+/*
+ * BOOX step probes (-DUBOOT_CURRENT_STEP=N via KCFLAGS). Instrumentation only:
+ * initr_mmc does not complete on this board and the CRU probe is exonerated
+ * (steps 18/19 blink), so the dwmmc probe is the next suspect. Note the mask
+ * ROM leaves the SD card mid-transfer, so re-initialising the controller under
+ * it is not obviously safe.
+ */
+#ifdef UBOOT_CURRENT_STEP
+static void boox_mmc_blink(void)
+{
+	volatile u32 i;
+
+	writel(BIT(11 + 16), (void __iomem *)0x200000f0);
+	setbits_le32((void __iomem *)(0x20084000 + 0x04), BIT(15));
+	while (1) {
+		setbits_le32((void __iomem *)0x20084000, BIT(15));
+		for (i = 0; i < 5000000; i++)
+			;
+		clrbits_le32((void __iomem *)0x20084000, BIT(15));
+		for (i = 0; i < 5000000; i++)
+			;
+	}
+}
+#define BOOX_MMC_STEP(n)	do { if ((n) == UBOOT_CURRENT_STEP) boox_mmc_blink(); } while (0)
+#else
+#define BOOX_MMC_STEP(n)	do { } while (0)
+#endif
+
 static int rockchip_dwmmc_probe(struct udevice *dev)
 {
+	/* 41: entered the dwmmc probe */
+	BOOX_MMC_STEP(41);
+
 	struct rockchip_mmc_plat *plat = dev_get_plat(dev);
 	struct mmc_uclass_priv *upriv = dev_get_uclass_priv(dev);
 	struct rockchip_dwmmc_priv *priv = dev_get_priv(dev);

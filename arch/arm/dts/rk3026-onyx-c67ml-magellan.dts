@@ -393,6 +393,18 @@
 &sdmmc {
 	status = "okay";
 	bus-width = <4>;
+	/*
+	 * REQUIRED by rockchip_dwmmc_of_to_plat(): with neither
+	 * 'clock-freq-min-max' nor 'max-frequency' it returns -EINVAL before the
+	 * probe is entered, initr_mmc fails, the INITCALL fails and U-Boot calls
+	 * hang() -- which presents as a lock-up, not an error.
+	 * PROVEN on hardware 2026-07-28: step 40 (CRU probe done) blinks, step 41
+	 * (dwmmc probe entered) does not.
+	 *
+	 * 50 MHz is the SD high-speed ceiling; conservative and not yet tuned.
+	 */
+	max-frequency = <50000000>;
+
 	cap-mmc-highspeed;
 	cap-sd-highspeed;
 	card-detect-delay = <200>;

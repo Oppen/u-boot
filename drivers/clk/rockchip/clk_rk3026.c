@@ -390,6 +390,9 @@ static int rk3026_clk_probe(struct udevice *dev)
 
 	rkclk_init(priv->cru);
 
+	/* 40: the whole CRU probe finished, PLLs and dividers included */
+	BOOX_CLK_STEP(40);
+
 	return 0;
 }
 
