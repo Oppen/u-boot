@@ -16,7 +16,15 @@
 #define LED_BIT		BIT(15)
 #define CRU_GATE_CON8	0x200000f0
 #define GATE_PCLK_GPIO2	11
-#define SPIN		5000000
+/*
+ * 200,000, not 5,000,000. A marker can fire while the PLLs are in slow mode --
+ * rkclk_set_pll() bypasses them to 24 MHz while reconfiguring -- and at the
+ * ~54k iterations/second measured in that state, 5M spins is ~90 s per half
+ * cycle, which reads as a SOLID LED. Any "solid" result from a card built with
+ * the larger count is suspect for that reason. At 200k the same worst case is a
+ * few seconds, while with caches on it is still slow enough to see.
+ */
+#define SPIN		200000
 
 int boox_scope;
 
