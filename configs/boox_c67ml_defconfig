@@ -117,6 +117,12 @@ CONFIG_DM_USB=y
 CONFIG_USB_DWC2=y
 CONFIG_USB_STORAGE=y
 CONFIG_SPL_TINY_MEMSET=y
+# UEFI is an upstream default for armv7 (lib/efi_loader/Kconfig: "default y if
+# ... SYS_CPU = armv7"), not something this board asked for. We boot a zImage
+# via extlinux/distroboot, never an EFI binary. It also pulls in LMB, DM_EVENT,
+# EVENT_DYNAMIC, LIB_UUID and CHARSET, adds efi_init_early + efi_memory_init to
+# board_init_r, and is part of why u-boot.img grew 844 -> 936 sectors.
+# CONFIG_EFI_LOADER is not set
 CONFIG_ERRNO_STR=y
 
 # USB CDC-ACM console. The OTG controller (usb@10180000, dwc2) is the only
