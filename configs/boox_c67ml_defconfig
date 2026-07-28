@@ -30,11 +30,6 @@ CONFIG_SPL_STACK=0x10081fff
 # ("b 1f"). The BROM then branches to a fixed 0x10080804. Linking at 0x...804
 # instead skews every absolute word by 4 and fails silently. (BROM disassembly.)
 CONFIG_SPL_TEXT_BASE=0x10080800
-# IRAM window is 0x10080800..0x10082000 = 6144 B, shared by the image and the
-# downward-growing SPL_STACK at 0x10081fff.  Ceiling = 6144 - 1536 B of stack
-# reserve.  Without this the overrun is silent: the image grows into the stack
-# and DRAM training corrupts itself.
-CONFIG_SPL_MAX_SIZE=0x1200
 # Minimal SPL, modeled on rk3036: a tiny board_init_f that inits the debug
 # UART + timer, brings up DRAM, and returns to the mask ROM (back-to-BROM).
 # The BROM never touches the DDR controller and leaves the PLLs bypassed at
@@ -121,10 +116,6 @@ CONFIG_USB=y
 CONFIG_DM_USB=y
 CONFIG_USB_DWC2=y
 CONFIG_USB_STORAGE=y
-# Recovery here is rockusb/maskrom, not fastboot.  Leaving it on also costs
-# U-Boot proper the gadget + flash backends for a protocol nothing uses.
-# CONFIG_USB_FUNCTION_FASTBOOT is not set
-# CONFIG_CMD_FASTBOOT is not set
 CONFIG_SPL_TINY_MEMSET=y
 CONFIG_ERRNO_STR=y
 

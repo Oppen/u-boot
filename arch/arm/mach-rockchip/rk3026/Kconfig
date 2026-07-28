@@ -22,20 +22,14 @@ config ROCKCHIP_BOOT_MODE_REG
 
 config ROCKCHIP_STIMER_BASE
 	hex
-	default 0x20044000
+	default 0x200440a0
 	help
-	  Timer0. Timers are 0x20 apart, so this block holds timer0 at +0x00 and
-	  timer1 at +0x20; +0x40 upwards reads as zero on this SoC.
+	  Restored to the pre-session value while bisecting a regression.
 
-	  rk3036's 0x200440a0 ("timer5") does not exist here -- that whole window
-	  reads 0x00000000 on a live device. It was inherited from rk3036, whose
-	  timer count differs, and produced the bogus "24 MHz / 64 = 375 kHz"
-	  figure this entry used to carry.
-
-	  The vendor MiniLoader programs exactly this base: load_count0 =
-	  0xffffffff at +0x00, ctrl = 1 at +0x10, counter read at +0x08, result
-	  inverted (down-counter), then scaled count*5/120 = count/24 -- i.e.
-	  24 MHz. Measured on hardware: 24,000,665 Hz.
+	  The device dump says timers are 0x20 apart with only n=0 and n=1
+	  implemented, so this address should not decode -- yet this is the value
+	  that was in the tree when the SPL demonstrably ran. Do not "fix" it
+	  again without a boot to show for it.
 
 config SYS_SOC
 	default "rk3026"

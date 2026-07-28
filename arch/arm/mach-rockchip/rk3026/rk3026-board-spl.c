@@ -43,34 +43,11 @@
  */
 #define STIMER		((struct rk_timer *)CONFIG_ROCKCHIP_STIMER_BASE)
 
-/*
- * Gate bits (vendor cru.h enum, offsets confirmed against the LED path's use of
- * con8): clk_timer0 is con1 bit 0, pclk_timer0 is con7 bit 7.  Hiword mask, so
- * setting the mask bit while leaving the value bit clear ungates.
- */
-#define CRU_CLKGATE_CON1	0x200000d4
-#define CRU_CLKGATE_CON7	0x200000ec
-#define GATE_CLK_TIMER0		0
-#define GATE_PCLK_TIMER0	7
-
 void rockchip_stimer_init(void)
 {
-	/*
-	 * Ungate first.  Unlike the old rk3036 address -- undecoded space here,
-	 * where writes went nowhere -- 0x20044000 is a real peripheral, and on
-	 * this SoC an access to a clock-gated block hangs the bus.  What the
-	 * BootROM leaves gated at handoff is not observable from a running
-	 * system, so do not assume it is on.
-	 */
-	writel(BIT(GATE_CLK_TIMER0 + 16), CRU_CLKGATE_CON1);
-	writel(BIT(GATE_PCLK_TIMER0 + 16), CRU_CLKGATE_CON7);
+	if (readl(&STIMER->timer_ctrl_reg) & 1)
+		return;
 
-	/*
-	 * Program unconditionally, as the vendor MiniLoader does.  An
-	 * already-enabled timer0 is not usable as-is: whoever enabled it may
-	 * have left a short reload value, and a counter that wraps every few ms
-	 * breaks get_ticks() rollover accounting.
-	 */
 	writel(0, &STIMER->timer_ctrl_reg);
 	writel(0xffffffff, &STIMER->timer_load_count0);
 	writel(0xffffffff, &STIMER->timer_load_count1);
@@ -114,22 +91,6 @@ static void spl_led_init(void)
 	setbits_le32(GPIO2_BASE + GPIO_SWPORTA_DDR, LED_BIT);
 }
 
-/*
- * Timer-free delay, same calibration as board/rockchip/boox-c67ml/boox-c67ml.c:
- * the BootROM raises APLL to 192 MHz before handing over (BROM 0x6a4 records
- * 0xC0 at 0x10080000), and this loop costs ~4 cycles per iteration.
- */
-#define SPL_SPIN_PER_MS	48000
-
-static void spin_ms(u32 ms)
-{
-	volatile u32 i;
-	u32 n = ms * SPL_SPIN_PER_MS;
-
-	for (i = 0; i < n; i++)
-		;
-}
-
 static void spl_led(bool on)
 {
 	if (on)
@@ -148,45 +109,20 @@ void board_init_f(ulong dummy)
 	 *
 	 * OFF = the mask ROM read the SD card and branched into our SPL.
 	 */
-	spl_led_init();
-	spl_led(false);
-
 #ifdef CONFIG_DEBUG_UART
 	debug_uart_init();
 #endif
 
 	rockchip_stimer_init();
 
+	/* OFF = the mask ROM read the SD card and branched into our SPL */
+	spl_led_init();
+	spl_led(false);
+
 	sdram_init();
 
-	/*
-	 * Two signals, in this order, and the split is the whole point:
-	 *
-	 *   1. spin-loop blinks -- prove sdram_init() returned.  These use no
-	 *      timer at all, so they stay readable even if the timebase is
-	 *      wrong, which is exactly the case we are trying to diagnose.
-	 *   2. udelay() blinks -- test the timebase itself.  Same nominal rate
-	 *      as the spin blinks, so a 64x error reads as one crawling pulse
-	 *      against six brisk ones rather than as a hang.
-	 *
-	 * If you see group 1 and not group 2, DRAM is fine and the timer is
-	 * still wrong.  If you see neither, sdram_init() did not return.
-	 */
-	for (int i = 0; i < 6; i++) {
-		spl_led(true);
-		spin_ms(250);
-		spl_led(false);
-		spin_ms(250);
-	}
-
-	spin_ms(1000);				/* gap: separates the groups */
-
-	for (int i = 0; i < 6; i++) {
-		spl_led(true);
-		udelay(250000);
-		spl_led(false);
-		udelay(250000);
-	}
+	/* ON = DRAM training returned; safe to hand back to the ROM */
+	spl_led(true);
 
 	/* return to the mask ROM, which loads U-Boot proper into DRAM */
 	back_to_bootrom(BROM_BOOT_NEXTSTAGE);

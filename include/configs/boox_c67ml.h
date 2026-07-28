@@ -36,8 +36,8 @@
  * get_tbclk() in lib/time.c.
  */
 #ifdef CONFIG_XPL_BUILD
-#define CFG_SYS_TIMER_COUNTER	(0x20044000 + 0x08)	/* timer0 curr_value0 */
-#define CFG_SYS_TIMER_RATE	24000000		/* measured 24,000,665 Hz */
+#define CFG_SYS_TIMER_COUNTER	(0x200440a0 + 0x08)	/* pre-session value */
+#define CFG_SYS_TIMER_RATE	375000			/* pre-session value */
 #endif
 
 #endif
