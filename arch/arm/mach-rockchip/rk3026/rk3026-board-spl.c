@@ -267,6 +267,81 @@ static void spl_spin(u32 n)
 #define BOOX_STEP(n)	do { } while (0)
 #endif
 
+/*
+ * Counter probes, steps 24-27 (T9/T10/T11). Run before sdram_init so the answer
+ * arrives in seconds.
+ *
+ * Every reading we have of timer0/timer1 was taken under a running Android
+ * kernel, which says nothing about decode or clock gating at ROM handoff. These
+ * sample the counter directly at the point the SPL actually uses it.
+ *
+ *   24  0x200440a0 (the base the SPL uses today) -- expected dead
+ *   25  timer0 at 0x20044000, programmed first
+ *   26  timer1 at 0x20044020, programmed first
+ *   27  timer0 again, but bucketing the RATE rather than liveness
+ *
+ * Signals: fast flicker = advancing (for 27: ~MHz), medium = advancing slowly
+ * (27 only), slow 1:1 = static. NO BLINK AT ALL is a third outcome: the access
+ * hung the bus, which a read of an undecoded or gated address can do.
+ */
+#if defined(UBOOT_CURRENT_STEP) && UBOOT_CURRENT_STEP >= 24 && UBOOT_CURRENT_STEP <= 27
+#define PROBE_SPIN	100000
+
+static void boox_counter_probe(void)
+{
+	u32 base, a, b, delta, period;
+
+#if UBOOT_CURRENT_STEP == 24
+	base = 0x200440a0;
+	const bool program = false;
+#elif UBOOT_CURRENT_STEP == 26
+	base = 0x20044020;
+	const bool program = true;
+#else
+	base = 0x20044000;
+	const bool program = true;
+#endif
+
+	spl_led_init();
+
+	if (program) {
+		/* MiniLoader's recipe, from FlashBoot: load0 = 0xffffffff at
+		 * +0x00, ctrl = 1 at +0x10, counter read at +0x08. */
+		writel(0, (void __iomem *)(base + 0x10));
+		writel(0xffffffff, (void __iomem *)(base + 0x00));
+		writel(0xffffffff, (void __iomem *)(base + 0x04));
+		writel(1, (void __iomem *)(base + 0x10));
+	}
+
+	a = readl((void __iomem *)(base + 0x08));
+	spl_spin(PROBE_SPIN);
+	b = readl((void __iomem *)(base + 0x08));
+	delta = a - b;			/* counts down; unsigned wrap is fine */
+
+#if UBOOT_CURRENT_STEP == 27
+	/*
+	 * PROBE_SPIN iterations is ~1.9 s at the measured ~54k iterations/s, so
+	 * a 24 MHz counter should move by tens of millions.
+	 */
+	if (!delta)
+		period = SPL_STEP_SPIN * 4;		/* static */
+	else if (delta < 1000000)
+		period = SPL_STEP_SPIN;			/* slow counter */
+	else
+		period = SPL_STEP_SPIN / 8;		/* ~MHz */
+#else
+	period = delta ? SPL_STEP_SPIN / 8 : SPL_STEP_SPIN * 4;
+#endif
+
+	while (1) {
+		spl_led(true);
+		spl_spin(period);
+		spl_led(false);
+		spl_spin(period);
+	}
+}
+#endif
+
 void board_init_f(ulong dummy)
 {
 	/*
@@ -291,6 +366,10 @@ void board_init_f(ulong dummy)
 
 	/* 3: the timer block answered and the liveness probe finished. */
 	BOOX_STEP(3);
+
+#if defined(UBOOT_CURRENT_STEP) && UBOOT_CURRENT_STEP >= 24 && UBOOT_CURRENT_STEP <= 27
+	boox_counter_probe();
+#endif
 
 	/*
 	 * 10: report what the liveness probe decided, rather than inferring the
