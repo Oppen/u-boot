@@ -482,6 +482,43 @@ static int device_get_dma_constraints(struct udevice *dev)
 	return 0;
 }
 
+/*
+ * BOOX step probes (-DUBOOT_CURRENT_STEP=N via KCFLAGS). Instrumentation only,
+ * and scoped to the SD controller: on this board device_probe() for
+ * mmc@10214000 never reaches the driver's probe (step 41 solid) even though
+ * of_to_plat now succeeds, so the DM core's own preparation is the suspect.
+ */
+#ifdef UBOOT_CURRENT_STEP
+static void boox_dm_blink(void)
+{
+	volatile u32 i;
+
+	writel(BIT(11 + 16), (void __iomem *)0x200000f0);
+	setbits_le32((void __iomem *)(0x20084000 + 0x04), BIT(15));
+	while (1) {
+		setbits_le32((void __iomem *)0x20084000, BIT(15));
+		for (i = 0; i < 5000000; i++)
+			;
+		clrbits_le32((void __iomem *)0x20084000, BIT(15));
+		for (i = 0; i < 5000000; i++)
+			;
+	}
+}
+
+static bool boox_is_sd(struct udevice *dev)
+{
+	return dev && dev->name && strstr(dev->name, "10214000");
+}
+
+#define BOOX_DM_STEP(n, dev)						\
+	do {								\
+		if ((n) == UBOOT_CURRENT_STEP && boox_is_sd(dev))	\
+			boox_dm_blink();				\
+	} while (0)
+#else
+#define BOOX_DM_STEP(n, dev)	do { } while (0)
+#endif
+
 int device_probe(struct udevice *dev)
 {
 	const struct driver *drv;
@@ -500,9 +537,13 @@ int device_probe(struct udevice *dev)
 	drv = dev->driver;
 	assert(drv);
 
+	BOOX_DM_STEP(42, dev);		/* entered device_probe for the SD */
+
 	ret = device_of_to_plat(dev);
 	if (ret)
 		goto fail;
+
+	BOOX_DM_STEP(43, dev);		/* of_to_plat OK (max-frequency fix works) */
 
 	/* Ensure all parents are probed */
 	if (dev->parent) {
@@ -546,6 +587,7 @@ int device_probe(struct udevice *dev)
 	 * associated uclass methods have not yet been called.
 	 */
 	if (dev->parent && device_get_uclass_id(dev) != UCLASS_PINCTRL) {
+		BOOX_DM_STEP(44, dev);	/* about to apply pinctrl "default" */
 		ret = pinctrl_select_state(dev, "default");
 		if (ret && ret != -ENOSYS)
 			log_debug("Device '%s' failed to configure default pinctrl: %d (%s)\n",
@@ -583,6 +625,8 @@ int device_probe(struct udevice *dev)
 		if (ret)
 			goto fail;
 	}
+
+	BOOX_DM_STEP(45, dev);		/* everything before drv->probe is done */
 
 	if (drv->probe) {
 		ret = drv->probe(dev);

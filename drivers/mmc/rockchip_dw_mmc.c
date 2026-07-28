@@ -7,6 +7,7 @@
 #include <dm.h>
 #include <dt-structs.h>
 #include <dwmmc.h>
+#include <boox_probe.h>
 #include <errno.h>
 #include <log.h>
 #include <mapmem.h>
@@ -165,6 +166,7 @@ static int rockchip_dwmmc_probe(struct udevice *dev)
 #else
 	ret = clk_get_by_index(dev, 1, &priv->clk);
 #endif
+	BOOX_STEP_AT(54);		/* clk_get for the ciu clock returned */
 	if (ret < 0 && ret != -ENOSYS)
 		return log_msg_ret("clk", ret);
 	host->fifo_depth = priv->fifo_depth;
@@ -180,6 +182,7 @@ static int rockchip_dwmmc_probe(struct udevice *dev)
 	}
 #endif
 	dwmci_setup_cfg(&plat->cfg, host, priv->minmax[1], priv->minmax[0]);
+	BOOX_STEP_AT(55);		/* dwmci_setup_cfg done -- calls the clock get_mmc_clk */
 	host->mmc = &plat->mmc;
 	host->mmc->priv = &priv->host;
 	host->mmc->dev = dev;
@@ -188,6 +191,8 @@ static int rockchip_dwmmc_probe(struct udevice *dev)
 	/* Hosts capable of 8-bit can also do 4 bits */
 	if (host->buswidth == 8)
 		plat->cfg.host_caps |= MMC_MODE_4BIT;
+
+	BOOX_STEP_AT(56);		/* about to call dwmci_probe -- this talks to the CARD */
 
 	return dwmci_probe(dev);
 }

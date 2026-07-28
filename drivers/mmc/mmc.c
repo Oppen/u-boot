@@ -15,6 +15,7 @@
 #include <dm/device-internal.h>
 #include <errno.h>
 #include <mmc.h>
+#include <boox_probe.h>
 #include <part.h>
 #include <time.h>
 #include <linux/bitops.h>
@@ -3214,8 +3215,10 @@ void mmc_set_preinit(struct mmc *mmc, int preinit)
 }
 
 #if CONFIG_IS_ENABLED(DM_MMC)
+
 static int mmc_probe(struct bd_info *bis)
 {
+	BOOX_STEP_AT(46);		/* entered mmc_probe (BLK variant) */
 	int ret, i;
 	struct uclass *uc;
 	struct udevice *dev;
@@ -3234,6 +3237,8 @@ static int mmc_probe(struct bd_info *bis)
 		if (ret == -ENODEV)
 			break;
 	}
+	BOOX_STEP_AT(48);	/* by_seq loop done, about to probe each device */
+
 	uclass_foreach_dev(dev, uc) {
 		ret = device_probe(dev);
 		if (ret)
@@ -3266,6 +3271,7 @@ int mmc_initialize(struct bd_info *bis)
 #endif
 #endif
 	ret = mmc_probe(bis);
+	BOOX_STEP_AT(51);		/* mmc_probe returned (value not checked yet) */
 	if (ret)
 		return ret;
 
@@ -3273,7 +3279,12 @@ int mmc_initialize(struct bd_info *bis)
 	print_mmc_devices(',');
 #endif
 
+	BOOX_STEP_AT(52);		/* print_mmc_devices done, about to preinit */
+
 	mmc_do_preinit();
+
+	BOOX_STEP_AT(53);		/* mmc_do_preinit done -- talks to the card */
+
 	return 0;
 }
 

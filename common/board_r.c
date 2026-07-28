@@ -25,6 +25,7 @@
 #include <lmb.h>
 #include <log.h>
 #include <net.h>
+#include <boox_probe.h>
 #include <asm/cache.h>
 #include <asm/global_data.h>
 #include <u-boot/crc.h>
@@ -734,6 +735,7 @@ static void initcall_run_r(void)
 #endif
 #if CONFIG_IS_ENABLED(EFI_LOADER)
 	INITCALL(efi_init_early);
+	BOOX_STEP_AT(49);		/* efi_init_early returned */
 #endif
 #if CONFIG_IS_ENABLED(CMD_NAND)
 	INITCALL(initr_nand);
@@ -742,6 +744,7 @@ static void initcall_run_r(void)
 	INITCALL(initr_onenand);
 #endif
 #if CONFIG_IS_ENABLED(MMC)
+	BOOX_STEP_AT(50);		/* about to call initr_mmc */
 	INITCALL(initr_mmc);
 	BOOX_R_STEP(37);		/* MMC subsystem up (dwmmc probe) */
 #endif

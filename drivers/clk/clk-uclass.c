@@ -10,6 +10,7 @@
 
 #include <clk.h>
 #include <clk-uclass.h>
+#include <boox_probe.h>
 #include <dm.h>
 #include <dt-structs.h>
 #include <errno.h>
@@ -88,7 +89,11 @@ static int clk_get_by_index_tail(int ret, ofnode node,
 	if (ret)
 		goto err;
 
+	BOOX_STEP_AT(57);	/* entered the tail: phandle parsed OK */
+
 	ret = uclass_get_device_by_ofnode(UCLASS_CLK, args->node, &dev_clk);
+
+	BOOX_STEP_AT(58);	/* got (and probed) the CRU device */
 	if (ret) {
 		debug("%s: uclass_get_device_by_of_offset failed: err=%d\n",
 		      __func__, ret);
@@ -107,6 +112,8 @@ static int clk_get_by_index_tail(int ret, ofnode node,
 		debug("of_xlate() failed: %d\n", ret);
 		return log_msg_ret("xlate", ret);
 	}
+
+	BOOX_STEP_AT(59);	/* of_xlate done, about to clk_request */
 
 	return clk_request(dev_clk, clk);
 err:
