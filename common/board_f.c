@@ -805,12 +805,44 @@ static int initf_bootstage(void)
 	return 0;
 }
 
+/*
+ * BOOX step probes (-DUBOOT_CURRENT_STEP=N via KCFLAGS). Instrumentation only:
+ * this board has no console, and there is no board hook between
+ * debug_uart_init (step 11, reached on hardware) and board_early_init_f
+ * (step 6, not reached), so the failing region is split from inside here.
+ *
+ * Blinks forever off a raw spin: no timer, no delay primitive, positive signal.
+ */
+#ifdef UBOOT_CURRENT_STEP
+static void boox_blink_forever(void)
+{
+	volatile u32 i;
+
+	writel(BIT(11 + 16), (void __iomem *)0x200000f0);		/* ungate PCLK_GPIO2 */
+	setbits_le32((void __iomem *)(0x20084000 + 0x04), BIT(15));	/* LED pin = output */
+
+	while (1) {
+		setbits_le32((void __iomem *)0x20084000, BIT(15));
+		for (i = 0; i < 100000; i++)
+			;
+		clrbits_le32((void __iomem *)0x20084000, BIT(15));
+		for (i = 0; i < 100000; i++)
+			;
+	}
+}
+#define BOOX_F_STEP(n)	do { if ((n) == UBOOT_CURRENT_STEP) boox_blink_forever(); } while (0)
+#else
+#define BOOX_F_STEP(n)	do { } while (0)
+#endif
+
 static int initf_dm(void)
 {
 	int ret;
 
 	if (!CONFIG_IS_ENABLED(SYS_MALLOC_F))
 		return 0;
+
+	BOOX_F_STEP(22);	/* entered initf_dm */
 
 	bootstage_start(BOOTSTAGE_ID_ACCUM_DM_F, "dm_f");
 
@@ -823,10 +855,18 @@ static int initf_dm(void)
 		ret = dm_init_and_scan(true);
 	else
 		ret = dm_init(false);
-	if (ret)
+	if (ret) {
+		/* 23: it RETURNED AN ERROR rather than hanging. Distinguishes a
+		 * failed scan (which then reaches hang(), LED untouched) from a
+		 * genuine lock-up inside binding. */
+		BOOX_F_STEP(23);
 		return ret;
+	}
+
+	BOOX_F_STEP(20);	/* dm_init_and_scan returned OK */
 
 	ret = dm_autoprobe();
+	BOOX_F_STEP(21);	/* dm_autoprobe returned (value not checked yet) */
 	if (ret)
 		return ret;
 	bootstage_accum(BOOTSTAGE_ID_ACCUM_DM_F);
@@ -876,35 +916,6 @@ static int initf_upl(void)
 	return 0;
 }
 
-/*
- * BOOX step probes (-DUBOOT_CURRENT_STEP=N via KCFLAGS). Instrumentation only:
- * this board has no console, and there is no board hook between
- * debug_uart_init (step 11, reached on hardware) and board_early_init_f
- * (step 6, not reached), so the failing region is split from inside here.
- *
- * Blinks forever off a raw spin: no timer, no delay primitive, positive signal.
- */
-#ifdef UBOOT_CURRENT_STEP
-static void boox_blink_forever(void)
-{
-	volatile u32 i;
-
-	writel(BIT(11 + 16), (void __iomem *)0x200000f0);		/* ungate PCLK_GPIO2 */
-	setbits_le32((void __iomem *)(0x20084000 + 0x04), BIT(15));	/* LED pin = output */
-
-	while (1) {
-		setbits_le32((void __iomem *)0x20084000, BIT(15));
-		for (i = 0; i < 100000; i++)
-			;
-		clrbits_le32((void __iomem *)0x20084000, BIT(15));
-		for (i = 0; i < 100000; i++)
-			;
-	}
-}
-#define BOOX_F_STEP(n)	do { if ((n) == UBOOT_CURRENT_STEP) boox_blink_forever(); } while (0)
-#else
-#define BOOX_F_STEP(n)	do { } while (0)
-#endif
 
 static void initcall_run_f(void)
 {
