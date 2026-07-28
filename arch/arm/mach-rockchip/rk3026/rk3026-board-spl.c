@@ -178,6 +178,18 @@ static void spl_led(bool on)
  *
  * This is the signalling that was confirmed on hardware on 2026-07-27.
  */
+/*
+ * T1: one switch for every rhythm. They cost real boot time on a stretched
+ * timebase, so they come out once the chain is trusted -- and come back with a
+ * one-line change. Step builds (T2) never run them: a step image must not
+ * depend on __udelay() at all, which is the point of having steps.
+ */
+#if defined(UBOOT_CURRENT_STEP) || defined(BOOX_NO_LED_PROGRESS)
+#define BOOX_LED_PROGRESS	0
+#else
+#define BOOX_LED_PROGRESS	1
+#endif
+
 static const u16 spl_rhy_slow[] = { 100, 100 };
 static const u16 spl_rhy_fast[] = { 200,  25 };
 
@@ -209,14 +221,43 @@ static void spl_led_rhythm(const u16 *ms, unsigned int n)
  * Steps 1-5 are the SPL; 6+ are U-Boot proper, in
  * board/rockchip/boox-c67ml/boox-c67ml.c.
  */
+/*
+ * Raw spin, for signalling only. Not a delay primitive: no timer, no udelay(),
+ * no calibration claim. The count is picked to be visible whatever the clock
+ * is -- an order of magnitude either way still reads as blinking.
+ */
+static void spl_spin(u32 n)
+{
+	volatile u32 i;
+
+	for (i = 0; i < n; i++)
+		;
+}
+
+/*
+ * Step probe builds (-DUBOOT_CURRENT_STEP=N via KCFLAGS).
+ *
+ * The marked step blinks FOREVER and never returns. Positive signal on purpose:
+ * "dark" is also what a hang looks like, so a step that ended dark could not be
+ * told apart from a crash just before it. Nothing else in this firmware ends in
+ * a repeating blink.
+ *
+ * Steps 1-5 are the SPL; 6+ are U-Boot proper, in
+ * board/rockchip/boox-c67ml/boox-c67ml.c.
+ */
+#define SPL_STEP_SPIN	3000000
+
 #ifdef UBOOT_CURRENT_STEP
 #define BOOX_STEP(n)						\
 	do {							\
 		if ((n) == UBOOT_CURRENT_STEP) {		\
 			spl_led_init();				\
-			spl_led(false);				\
-			while (1)				\
-				;				\
+			while (1) {				\
+				spl_led(true);			\
+				spl_spin(SPL_STEP_SPIN);	\
+				spl_led(false);			\
+				spl_spin(SPL_STEP_SPIN);	\
+			}					\
 		}						\
 	} while (0)
 #else
@@ -248,9 +289,35 @@ void board_init_f(ulong dummy)
 	/* 3: the timer block answered and the liveness probe finished. */
 	BOOX_STEP(3);
 
+	/*
+	 * 10: report what the liveness probe decided, rather than inferring the
+	 * timebase from how long a blink took. Two rates, both raw spins:
+	 *
+	 *   fast flicker  the counter advances -- __udelay() uses the timer
+	 *   slow 1:1      it does not -- every delay is the uncalibrated spin
+	 *
+	 * If this says "slow", then TIMER_HZ never applied and the historic
+	 * "24 MHz / 64 = 375 kHz" was the fallback all along (docs/PENDING.md H1).
+	 */
+#ifdef UBOOT_CURRENT_STEP
+	if (UBOOT_CURRENT_STEP == 10) {
+		u32 period = stimer_ticks ? SPL_STEP_SPIN / 8
+					  : SPL_STEP_SPIN * 4;
+
+		spl_led_init();
+		while (1) {
+			spl_led(true);
+			spl_spin(period);
+			spl_led(false);
+			spl_spin(period);
+		}
+	}
+#endif
+
 	/* slow pulse = the mask ROM read the SD card and branched into our SPL */
 	spl_led_init();
-	spl_led_rhythm(spl_rhy_slow, ARRAY_SIZE(spl_rhy_slow));
+	if (BOOX_LED_PROGRESS)
+		spl_led_rhythm(spl_rhy_slow, ARRAY_SIZE(spl_rhy_slow));
 
 	sdram_init();
 
@@ -258,7 +325,8 @@ void board_init_f(ulong dummy)
 	BOOX_STEP(4);
 
 	/* mostly-on = DRAM trained; safe to hand back to the ROM */
-	spl_led_rhythm(spl_rhy_fast, ARRAY_SIZE(spl_rhy_fast));
+	if (BOOX_LED_PROGRESS)
+		spl_led_rhythm(spl_rhy_fast, ARRAY_SIZE(spl_rhy_fast));
 
 	/* 5: about to leave the SPL. */
 	BOOX_STEP(5);

@@ -192,23 +192,63 @@ enum boox_stage {
  * 6-9 are here. The marked step turns the LED off and halts, so the result is a
  * single unambiguous state that keeps until you look at it.
  */
+/*
+ * Raw spin for signalling only -- no timer, no mdelay(), no calibration claim.
+ * Sized to read as a blink across any plausible clock.
+ */
+static void boox_step_spin(u32 n)
+{
+	volatile u32 i;
+
+	for (i = 0; i < n; i++)
+		;
+}
+
+/*
+ * Step probe builds (-DUBOOT_CURRENT_STEP=N via KCFLAGS); the SPL half lives in
+ * arch/arm/mach-rockchip/rk3026/rk3026-board-spl.c. Steps 1-5 are the SPL, 6-9
+ * here.
+ *
+ * The marked step blinks FOREVER. Positive signal on purpose: ending dark was
+ * indistinguishable from a hang just before the step, which made every result
+ * past step 6 unprovable.
+ */
+#define BOOX_STEP_SPIN	3000000
+
 #ifdef UBOOT_CURRENT_STEP
 #define BOOX_STEP(n)						\
 	do {							\
 		if ((n) == UBOOT_CURRENT_STEP) {		\
 			led_init();				\
-			led_set(false);				\
-			while (1)				\
-				;				\
+			while (1) {				\
+				led_set(true);			\
+				boox_step_spin(BOOX_STEP_SPIN);	\
+				led_set(false);			\
+				boox_step_spin(BOOX_STEP_SPIN);	\
+			}					\
 		}						\
 	} while (0)
 #else
 #define BOOX_STEP(n)	do { } while (0)
 #endif
 
+/*
+ * T1: one switch for every rhythm here too. Off for step builds (T2), since a
+ * step image must not depend on a delay primitive, and off via
+ * BOOX_NO_LED_PROGRESS once the chain is trusted -- the rhythms cost real boot
+ * time. led_rhythm_forever() for the terminal stage is deliberately NOT gated:
+ * it is the result, not progress reporting.
+ */
+#if defined(UBOOT_CURRENT_STEP) || defined(BOOX_NO_LED_PROGRESS)
+#define BOOX_LED_PROGRESS	0
+#else
+#define BOOX_LED_PROGRESS	1
+#endif
+
 static void led_stage(enum boox_stage stage, bool use_timer)
 {
-	led_rhythm_run(&boox_rhythms[stage], use_timer);
+	if (BOOX_LED_PROGRESS)
+		led_rhythm_run(&boox_rhythms[stage], use_timer);
 }
 
 #ifdef CONFIG_BOARD_EARLY_INIT_F
