@@ -18,6 +18,8 @@
 #define GATE_PCLK_GPIO2	11
 #define SPIN		5000000
 
+int boox_scope;
+
 noinline void boox_step_blink(void)
 {
 	volatile u32 i;

@@ -19,6 +19,7 @@
 #include <fdt_support.h>
 #include <malloc.h>
 #include <asm/cache.h>
+#include <boox_probe.h>
 #include <dm/device.h>
 #include <dm/device-internal.h>
 #include <dm/lists.h>
@@ -489,20 +490,10 @@ static int device_get_dma_constraints(struct udevice *dev)
  * of_to_plat now succeeds, so the DM core's own preparation is the suspect.
  */
 #ifdef UBOOT_CURRENT_STEP
-static void boox_dm_blink(void)
-{
-	volatile u32 i;
 
-	writel(BIT(11 + 16), (void __iomem *)0x200000f0);
-	setbits_le32((void __iomem *)(0x20084000 + 0x04), BIT(15));
-	while (1) {
-		setbits_le32((void __iomem *)0x20084000, BIT(15));
-		for (i = 0; i < 5000000; i++)
-			;
-		clrbits_le32((void __iomem *)0x20084000, BIT(15));
-		for (i = 0; i < 5000000; i++)
-			;
-	}
+static bool boox_is_cru(struct udevice *dev)
+{
+	return dev && dev->name && strstr(dev->name, "20000000");
 }
 
 static bool boox_is_sd(struct udevice *dev)
@@ -513,10 +504,16 @@ static bool boox_is_sd(struct udevice *dev)
 #define BOOX_DM_STEP(n, dev)						\
 	do {								\
 		if ((n) == UBOOT_CURRENT_STEP && boox_is_sd(dev))	\
-			boox_dm_blink();				\
+			boox_step_blink();				\
+	} while (0)
+#define BOOX_DM_STEP2(n, cond)						\
+	do {								\
+		if ((n) == UBOOT_CURRENT_STEP && (cond))		\
+			boox_step_blink();				\
 	} while (0)
 #else
 #define BOOX_DM_STEP(n, dev)	do { } while (0)
+#define BOOX_DM_STEP2(n, cond)	do { } while (0)
 #endif
 
 int device_probe(struct udevice *dev)
@@ -634,9 +631,13 @@ int device_probe(struct udevice *dev)
 			goto fail;
 	}
 
+	BOOX_DM_STEP2(61, boox_is_cru(dev));	/* CRU: drv->probe returned */
+
 	ret = uclass_post_probe_device(dev);
 	if (ret)
 		goto fail_uclass;
+
+	BOOX_DM_STEP2(62, boox_is_cru(dev));	/* CRU: uclass_post_probe done */
 
 	if (dev->parent && device_get_uclass_id(dev) == UCLASS_PINCTRL) {
 		ret = pinctrl_select_state(dev, "default");
@@ -648,6 +649,8 @@ int device_probe(struct udevice *dev)
 	ret = device_notify(dev, EVT_DM_POST_PROBE);
 	if (ret)
 		goto fail_event;
+
+	BOOX_DM_STEP2(63, boox_is_cru(dev));	/* CRU: device_probe about to return */
 
 	return 0;
 fail_event:

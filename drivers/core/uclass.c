@@ -17,6 +17,7 @@
 #include <dm/device-internal.h>
 #include <dm/lists.h>
 #include <dm/ofnode_graph.h>
+#include <boox_probe.h>
 #include <dm/uclass.h>
 #include <dm/uclass-internal.h>
 #include <dm/util.h>
@@ -545,11 +546,21 @@ int uclass_get_device_by_ofnode(enum uclass_id id, ofnode node,
 
 	log(LOGC_DM, LOGL_DEBUG, "Looking for %s\n", ofnode_get_name(node));
 	*devp = NULL;
+
+	BOOX_STEP_AT_IF(67, boox_scope);	/* SD-scoped: CLK lookup entered */
+
 	ret = uclass_find_device_by_ofnode(id, node, &dev);
+
+	BOOX_STEP_AT_IF(68, boox_scope);	/* SD-scoped: device found, not yet probed */
 	log(LOGC_DM, LOGL_DEBUG, "   - result for %s: %s (ret=%d)\n",
 	    ofnode_get_name(node), dev ? dev->name : "(none)", ret);
 
-	return uclass_get_device_tail(dev, ret, devp);
+	{
+		int boox_r = uclass_get_device_tail(dev, ret, devp);
+
+		BOOX_STEP_AT_IF(69, boox_scope);	/* SD-scoped: tail returned */
+		return boox_r;
+	}
 }
 
 #if CONFIG_IS_ENABLED(OF_REAL)

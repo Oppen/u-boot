@@ -83,17 +83,27 @@ static int clk_get_by_index_tail(int ret, ofnode node,
 {
 	struct udevice *dev_clk;
 	const struct clk_ops *ops;
+#ifdef UBOOT_CURRENT_STEP
+	/* scope every probe below to the SD controller's own lookup */
+	bool boox_sd = strstr(ofnode_get_name(node), "10214000");
+#endif
 
 	assert(clk);
 	clk->dev = NULL;
 	if (ret)
 		goto err;
 
-	BOOX_STEP_AT(57);	/* entered the tail: phandle parsed OK */
+	BOOX_STEP_AT_IF(57, boox_sd);	/* SD: entered the tail, phandle parsed */
 
+#ifdef UBOOT_CURRENT_STEP
+	boox_scope = boox_sd;
+#endif
 	ret = uclass_get_device_by_ofnode(UCLASS_CLK, args->node, &dev_clk);
+#ifdef UBOOT_CURRENT_STEP
+	boox_scope = 0;
+#endif
 
-	BOOX_STEP_AT(58);	/* got (and probed) the CRU device */
+	BOOX_STEP_AT_IF(58, boox_sd);	/* SD: got (and probed) the CRU */
 	if (ret) {
 		debug("%s: uclass_get_device_by_of_offset failed: err=%d\n",
 		      __func__, ret);
@@ -113,9 +123,14 @@ static int clk_get_by_index_tail(int ret, ofnode node,
 		return log_msg_ret("xlate", ret);
 	}
 
-	BOOX_STEP_AT(59);	/* of_xlate done, about to clk_request */
+	BOOX_STEP_AT_IF(59, boox_sd);	/* SD: of_xlate done, about to clk_request */
 
-	return clk_request(dev_clk, clk);
+	{
+		int boox_ret = clk_request(dev_clk, clk);
+
+		BOOX_STEP_AT_IF(60, boox_sd);	/* SD: clk_request returned */
+		return boox_ret;
+	}
 err:
 	debug("%s: Node '%s', property '%s', failed to request CLK index %d: %d\n",
 	      __func__, ofnode_get_name(node), list_name, index, ret);
