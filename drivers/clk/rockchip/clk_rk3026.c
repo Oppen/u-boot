@@ -47,6 +47,33 @@ enum {
 static const struct pll_div apll_init_cfg = PLL_DIVISORS(APLL_HZ, 1, 3, 1);
 static const struct pll_div gpll_init_cfg = PLL_DIVISORS(GPLL_HZ, 2, 2, 1);
 
+/*
+ * BOOX step probes (-DUBOOT_CURRENT_STEP=N via KCFLAGS). Instrumentation only.
+ * Step 16 (after mach_cpu_init) blinks on hardware and step 17 (after initf_dm)
+ * does not, so the hang is inside pre-reloc driver-model init. This PLL lock
+ * wait is unbounded, which makes it the prime suspect.
+ */
+#ifdef UBOOT_CURRENT_STEP
+static void boox_clk_blink(void)
+{
+	volatile u32 i;
+
+	writel(BIT(11 + 16), (void __iomem *)0x200000f0);
+	setbits_le32((void __iomem *)(0x20084000 + 0x04), BIT(15));
+	while (1) {
+		setbits_le32((void __iomem *)0x20084000, BIT(15));
+		for (i = 0; i < 100000; i++)
+			;
+		clrbits_le32((void __iomem *)0x20084000, BIT(15));
+		for (i = 0; i < 100000; i++)
+			;
+	}
+}
+#define BOOX_CLK_STEP(n)	do { if ((n) == UBOOT_CURRENT_STEP) boox_clk_blink(); } while (0)
+#else
+#define BOOX_CLK_STEP(n)	do { } while (0)
+#endif
+
 static int rkclk_set_pll(struct rk3026_cru *cru, enum rk_clk_id clk_id,
 			 const struct pll_div *div)
 {
@@ -72,12 +99,20 @@ static int rkclk_set_pll(struct rk3026_cru *cru, enum rk_clk_id clk_id,
 		     (div->postdiv2 << PLL_POSTDIV2_SHIFT |
 		     div->refdiv << PLL_REFDIV_SHIFT));
 
+	/* 18: reached the PLL lock wait (i.e. clk probe is running) */
+	BOOX_CLK_STEP(18);
+
 	/* waiting for pll lock */
 	while (readl(&pll->con1) & (1 << PLL_LOCK_STATUS_SHIFT))
 		udelay(1);
 
+	/* 19: the PLL lock wait returned */
+	BOOX_CLK_STEP(19);
+
 	return 0;
 }
+
+
 
 static void rkclk_init(struct rk3026_cru *cru)
 {
