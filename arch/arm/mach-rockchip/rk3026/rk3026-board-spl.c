@@ -327,6 +327,62 @@ void board_init_f(ulong dummy)
 	/* 4: sdram_init() returned. */
 	BOOX_STEP(4);
 
+	/*
+	 * 12: does DRAM actually WORK?
+	 *
+	 * sdram_init() returning proves only that our code finished, not that
+	 * the controller is configured correctly. If DRAM is dead, the ROM's
+	 * copy of U-Boot proper to 0x60000000 goes into the void and its branch
+	 * there executes garbage -- with the LED never touched, which looks
+	 * exactly like "U-Boot proper never ran".
+	 *
+	 * Write/read-back across the whole 512 MiB, including the far end and a
+	 * cross-bank address, with patterns that catch stuck bits and aliasing
+	 * (address-in-address catches a controller that wraps).
+	 *
+	 *   fast flicker  every location read back correctly
+	 *   slow 1:1      at least one failed
+	 */
+#ifdef UBOOT_CURRENT_STEP
+	if (UBOOT_CURRENT_STEP == 12) {
+		static const u32 offs[] = {
+			0x00000000, 0x00000004, 0x00001000, 0x00100000,
+			0x01000000, 0x08000000, 0x10000000, 0x1ffffff0,
+		};
+		bool ok = true;
+		unsigned int k;
+
+		for (k = 0; k < ARRAY_SIZE(offs); k++) {
+			u32 a = 0x60000000 + offs[k];
+
+			writel(0xa5a5a5a5, (void __iomem *)a);
+			if (readl((void __iomem *)a) != 0xa5a5a5a5)
+				ok = false;
+			writel(a, (void __iomem *)a);		/* addr-in-addr */
+			if (readl((void __iomem *)a) != a)
+				ok = false;
+		}
+		/* re-read all: catches aliasing, where a later write clobbered an
+		 * earlier address that the controller maps to the same cell */
+		for (k = 0; k < ARRAY_SIZE(offs); k++) {
+			u32 a = 0x60000000 + offs[k];
+
+			if (readl((void __iomem *)a) != a)
+				ok = false;
+		}
+
+		spl_led_init();
+		while (1) {
+			u32 period = ok ? SPL_STEP_SPIN / 8 : SPL_STEP_SPIN * 4;
+
+			spl_led(true);
+			spl_spin(period);
+			spl_led(false);
+			spl_spin(period);
+		}
+	}
+#endif
+
 	/* mostly-on = DRAM trained; safe to hand back to the ROM */
 	if (BOOX_LED_PROGRESS)
 		spl_led_rhythm(spl_rhy_fast, ARRAY_SIZE(spl_rhy_fast));

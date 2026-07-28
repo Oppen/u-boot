@@ -876,6 +876,36 @@ static int initf_upl(void)
 	return 0;
 }
 
+/*
+ * BOOX step probes (-DUBOOT_CURRENT_STEP=N via KCFLAGS). Instrumentation only:
+ * this board has no console, and there is no board hook between
+ * debug_uart_init (step 11, reached on hardware) and board_early_init_f
+ * (step 6, not reached), so the failing region is split from inside here.
+ *
+ * Blinks forever off a raw spin: no timer, no delay primitive, positive signal.
+ */
+#ifdef UBOOT_CURRENT_STEP
+static void boox_blink_forever(void)
+{
+	volatile u32 i;
+
+	writel(BIT(11 + 16), (void __iomem *)0x200000f0);		/* ungate PCLK_GPIO2 */
+	setbits_le32((void __iomem *)(0x20084000 + 0x04), BIT(15));	/* LED pin = output */
+
+	while (1) {
+		setbits_le32((void __iomem *)0x20084000, BIT(15));
+		for (i = 0; i < 100000; i++)
+			;
+		clrbits_le32((void __iomem *)0x20084000, BIT(15));
+		for (i = 0; i < 100000; i++)
+			;
+	}
+}
+#define BOOX_F_STEP(n)	do { if ((n) == UBOOT_CURRENT_STEP) boox_blink_forever(); } while (0)
+#else
+#define BOOX_F_STEP(n)	do { } while (0)
+#endif
+
 static void initcall_run_f(void)
 {
 	/*
@@ -883,13 +913,16 @@ static void initcall_run_f(void)
 	 * For simplicity it should remain an ordered list of function calls.
 	 */
 	INITCALL(setup_mon_len);
+	BOOX_F_STEP(13);		/* reached board_init_f's sequence */
 #if CONFIG_IS_ENABLED(OF_CONTROL)
 	INITCALL(fdtdec_setup);
 #endif
+	BOOX_F_STEP(14);		/* fdtdec_setup returned: the DTB was found */
 #if CONFIG_IS_ENABLED(TRACE_EARLY)
 	INITCALL(trace_early_init);
 #endif
 	INITCALL(initf_malloc);
+	BOOX_F_STEP(15);		/* early malloc up (its arena is in DRAM) */
 	INITCALL(initf_upl);
 	INITCALL(log_init);
 	INITCALL(initf_bootstage); /* uses its own timer, so does not need DM */
@@ -902,7 +935,9 @@ static void initcall_run_f(void)
 	INITCALL_EVT(EVT_FSP_INIT_F);
 	INITCALL(arch_cpu_init);	/* basic arch cpu dependent setup */
 	INITCALL(mach_cpu_init);	/* SoC/machine dependent CPU setup */
+	BOOX_F_STEP(16);		/* arch/mach cpu init done */
 	INITCALL(initf_dm);
+	BOOX_F_STEP(17);		/* driver model initialised */
 #if CONFIG_IS_ENABLED(BOARD_EARLY_INIT_F)
 	INITCALL(board_early_init_f);
 #endif
