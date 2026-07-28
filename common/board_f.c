@@ -814,7 +814,7 @@ static int initf_bootstage(void)
  * Blinks forever off a raw spin: no timer, no delay primitive, positive signal.
  */
 #ifdef UBOOT_CURRENT_STEP
-static void boox_blink_forever(void)
+static void boox_blink_period(u32 spin)
 {
 	volatile u32 i;
 
@@ -823,12 +823,17 @@ static void boox_blink_forever(void)
 
 	while (1) {
 		setbits_le32((void __iomem *)0x20084000, BIT(15));
-		for (i = 0; i < 100000; i++)
+		for (i = 0; i < spin; i++)
 			;
 		clrbits_le32((void __iomem *)0x20084000, BIT(15));
-		for (i = 0; i < 100000; i++)
+		for (i = 0; i < spin; i++)
 			;
 	}
+}
+
+static void boox_blink_forever(void)
+{
+	boox_blink_period(100000);
 }
 #define BOOX_F_STEP(n)	do { if ((n) == UBOOT_CURRENT_STEP) boox_blink_forever(); } while (0)
 #else
@@ -858,8 +863,25 @@ static int initf_dm(void)
 	if (ret) {
 		/* 23: it RETURNED AN ERROR rather than hanging. Distinguishes a
 		 * failed scan (which then reaches hang(), LED untouched) from a
-		 * genuine lock-up inside binding. */
+		 * genuine lock-up inside binding. Confirmed on hardware: blinks. */
 		BOOX_F_STEP(23);
+#ifdef UBOOT_CURRENT_STEP
+		/*
+		 * 28: which error, without needing to count blinks. Three rates
+		 * only, chosen for the plausible failures of a pre-reloc scan.
+		 */
+		if (UBOOT_CURRENT_STEP == 28) {
+			u32 period;
+
+			if (ret == -ENOMEM)
+				period = 12500;		/* fast: out of early malloc */
+			else if (ret == -ENODEV || ret == -ENOENT)
+				period = 100000;	/* medium: nothing to bind */
+			else
+				period = 400000;	/* slow: something else */
+			boox_blink_period(period);
+		}
+#endif
 		return ret;
 	}
 
