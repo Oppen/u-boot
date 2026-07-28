@@ -29,29 +29,92 @@
 #include <asm/arch-rockchip/timer.h>
 
 /*
- * Timebase.
+ * Delays.
  *
- * lib/time.c does all the work once CFG_SYS_TIMER_COUNTER, CFG_SYS_TIMER_RATE
- * and CONFIG_SYS_TIMER_COUNTS_DOWN are set (see include/configs/boox_c67ml.h):
- * it provides timer_read_counter(), a get_ticks() that carries 32-bit rollover
- * into 64 bits, and a __udelay() whose usec_to_tick() is 64-bit and whose
- * "tmp + 1" floor means a sub-tick delay still waits one tick.
+ * Two things were measured on hardware to get here, and both matter:
  *
- * All this file has to do is start the counter -- and not use the weak
- * rockchip_stimer_init(), which writes CNTFRQ (mcr p15,0,c14,c0,0), undefined
- * on Cortex-A9.
+ *  1. The counter at 0x200440a0 works, but runs at 24 MHz / 64 = 375 kHz, not
+ *     the 24 MHz its name suggests. An SPL delay written for 24 MHz took 65 s
+ *     for a requested 1 s -- repeatably, timed by hand. 65 vs the ideal 64 is
+ *     1.6%, i.e. loop overhead. So it is a perfectly good timebase once its
+ *     rate is right, and it is immune to whatever the CPU clock is doing.
+ *
+ *  2. Replacing it with a CPU spin loop was worse. The counter is volatile and
+ *     lives on the stack, the SPL runs from SRAM with caches off, so each
+ *     iteration is a load and a store to uncached memory -- far more than the
+ *     ~4 cycles a spin loop is usually costed at. The blink slowed until it
+ *     looked solid.
+ *
+ * So: use the timer, with the measured rate, and keep a spin only as a fallback
+ * for the case where the counter is not advancing at all. Compute ticks in 64
+ * bits -- at 375 kHz, TIMER_HZ / 1000000 truncates to zero in integer maths and
+ * every delay would silently become no delay.
+ *
+ * This configuration is the one that reached "DRAM trained" and handed off to
+ * U-Boot proper over SD (2026-07-27 session, observed by the maintainer). A
+ * later switch to lib/time.c's CFG_SYS_TIMER_* path, and a 2026-07-28 move to
+ * timer0 at 0x20044000, each stopped it booting. Do not replace it again
+ * without a boot as evidence.
  */
 #define STIMER		((struct rk_timer *)CONFIG_ROCKCHIP_STIMER_BASE)
+#define TIMER_HZ	375000		/* measured: 24 MHz / 64 */
 
+/* Deliberately generous: only used if the counter is dead, where slow beats hung. */
+#define SPL_FALLBACK_LOOPS_PER_US	12
+
+static bool stimer_ticks;
+
+static void __udelay_spin(unsigned long usec)
+{
+	volatile u32 i;
+	u32 loops = usec * SPL_FALLBACK_LOOPS_PER_US;
+
+	for (i = 0; i < loops; i++)
+		;
+}
+
+void __udelay(unsigned long usec)
+{
+	u32 start, ticks;
+
+	if (!stimer_ticks) {
+		__udelay_spin(usec);
+		return;
+	}
+
+	ticks = (u32)((u64)usec * TIMER_HZ / 1000000);
+	start = readl(&STIMER->timer_curr_value0);
+
+	while ((start - readl(&STIMER->timer_curr_value0)) < ticks)
+		;
+}
+
+/*
+ * Override the weak generic version: it writes CNTFRQ (mcr p15,0,c14,c0,0),
+ * undefined on Cortex-A9. Start the free-running down-counter, then check it
+ * actually advances -- a dead block reads a constant and every __udelay() would
+ * spin forever on it.
+ */
 void rockchip_stimer_init(void)
 {
-	if (readl(&STIMER->timer_ctrl_reg) & 1)
-		return;
+	u32 a;
+	int i;
 
-	writel(0, &STIMER->timer_ctrl_reg);
-	writel(0xffffffff, &STIMER->timer_load_count0);
-	writel(0xffffffff, &STIMER->timer_load_count1);
-	writel(1, &STIMER->timer_ctrl_reg);
+	if (!(readl(&STIMER->timer_ctrl_reg) & 1)) {
+		writel(0, &STIMER->timer_ctrl_reg);
+		writel(0xffffffff, &STIMER->timer_load_count0);
+		writel(0xffffffff, &STIMER->timer_load_count1);
+		writel(1, &STIMER->timer_ctrl_reg);
+	}
+
+	a = readl(&STIMER->timer_curr_value0);
+	for (i = 0; i < 100000; i++) {
+		if (readl(&STIMER->timer_curr_value0) != a) {
+			stimer_ticks = true;
+			return;
+		}
+	}
+	stimer_ticks = false;
 }
 
 /*
@@ -99,6 +162,67 @@ static void spl_led(bool on)
 		clrbits_le32(GPIO2_BASE + GPIO_SWPORTA_DR, LED_BIT);
 }
 
+/*
+ * Rhythms, not counts. Each milestone gets a shape recognisable at a glance: a
+ * count has to be watched from its start and tallied, and adjacent counts look
+ * alike -- which matters most here, where the milestones are "the ROM read the
+ * card" and "DRAM works", and confusing them sends you debugging the wrong
+ * thing.
+ *
+ *   SPL entered    symmetric   1:1   equal on and off
+ *   DRAM trained   mostly on   8:1   looks lit, winks off
+ *
+ * Ratios, not rates: if the timebase is wrong every pattern stretches by the
+ * same factor, so a ratio still identifies the stage where an absolute rate
+ * does not.
+ *
+ * This is the signalling that was confirmed on hardware on 2026-07-27.
+ */
+static const u16 spl_rhy_slow[] = { 100, 100 };
+static const u16 spl_rhy_fast[] = { 200,  25 };
+
+#define SPL_LED_DWELL_MS	600
+
+static void spl_led_rhythm(const u16 *ms, unsigned int n)
+{
+	u32 elapsed = 0;
+	unsigned int i;
+
+	while (elapsed < SPL_LED_DWELL_MS) {
+		for (i = 0; i < n; i++) {
+			spl_led(!(i & 1));
+			mdelay(ms[i]);
+			elapsed += ms[i];
+		}
+	}
+	spl_led(false);
+}
+
+/*
+ * Step probe builds (-DUBOOT_CURRENT_STEP=N via KCFLAGS).
+ *
+ * One image per step. The marked step turns the LED off and halts; nothing
+ * else runs. No rhythm to catch mid-cycle, no duty ratio to judge, no timer
+ * involved -- the only question per image is "did it go dark", and the answer
+ * keeps until you look. Burn the next number to advance.
+ *
+ * Steps 1-5 are the SPL; 6+ are U-Boot proper, in
+ * board/rockchip/boox-c67ml/boox-c67ml.c.
+ */
+#ifdef UBOOT_CURRENT_STEP
+#define BOOX_STEP(n)						\
+	do {							\
+		if ((n) == UBOOT_CURRENT_STEP) {		\
+			spl_led_init();				\
+			spl_led(false);				\
+			while (1)				\
+				;				\
+		}						\
+	} while (0)
+#else
+#define BOOX_STEP(n)	do { } while (0)
+#endif
+
 void board_init_f(ulong dummy)
 {
 	/*
@@ -109,20 +233,35 @@ void board_init_f(ulong dummy)
 	 *
 	 * OFF = the mask ROM read the SD card and branched into our SPL.
 	 */
+	/* 1: the ROM branched into us. First point at which anything is safe. */
+	BOOX_STEP(1);
+
 #ifdef CONFIG_DEBUG_UART
 	debug_uart_init();
 #endif
 
+	/* 2: the debug UART did not hang. */
+	BOOX_STEP(2);
+
 	rockchip_stimer_init();
 
-	/* OFF = the mask ROM read the SD card and branched into our SPL */
+	/* 3: the timer block answered and the liveness probe finished. */
+	BOOX_STEP(3);
+
+	/* slow pulse = the mask ROM read the SD card and branched into our SPL */
 	spl_led_init();
-	spl_led(false);
+	spl_led_rhythm(spl_rhy_slow, ARRAY_SIZE(spl_rhy_slow));
 
 	sdram_init();
 
-	/* ON = DRAM training returned; safe to hand back to the ROM */
-	spl_led(true);
+	/* 4: sdram_init() returned. */
+	BOOX_STEP(4);
+
+	/* mostly-on = DRAM trained; safe to hand back to the ROM */
+	spl_led_rhythm(spl_rhy_fast, ARRAY_SIZE(spl_rhy_fast));
+
+	/* 5: about to leave the SPL. */
+	BOOX_STEP(5);
 
 	/* return to the mask ROM, which loads U-Boot proper into DRAM */
 	back_to_bootrom(BROM_BOOT_NEXTSTAGE);

@@ -35,9 +35,11 @@
  * defining CFG_SYS_TIMER_RATE there would collide with the driver-model
  * get_tbclk() in lib/time.c.
  */
-#ifdef CONFIG_XPL_BUILD
-#define CFG_SYS_TIMER_COUNTER	(0x200440a0 + 0x08)	/* pre-session value */
-#define CFG_SYS_TIMER_RATE	375000			/* pre-session value */
-#endif
+/*
+ * No CFG_SYS_TIMER_* here. The SPL defines its own __udelay() in
+ * rk3026-board-spl.c; routing it through lib/time.c's pre-driver-model path
+ * instead is what stopped the SPL booting on 2026-07-27 (it had reached "DRAM
+ * trained" and handed off to U-Boot proper immediately before that change).
+ */
 
 #endif

@@ -186,6 +186,26 @@ enum boox_stage {
 	BOOX_LAST_STAGE,
 };
 
+/*
+ * Step probe builds (-DUBOOT_CURRENT_STEP=N via KCFLAGS); see the same macro in
+ * arch/arm/mach-rockchip/rk3026/rk3026-board-spl.c. Steps 1-5 are the SPL,
+ * 6-9 are here. The marked step turns the LED off and halts, so the result is a
+ * single unambiguous state that keeps until you look at it.
+ */
+#ifdef UBOOT_CURRENT_STEP
+#define BOOX_STEP(n)						\
+	do {							\
+		if ((n) == UBOOT_CURRENT_STEP) {		\
+			led_init();				\
+			led_set(false);				\
+			while (1)				\
+				;				\
+		}						\
+	} while (0)
+#else
+#define BOOX_STEP(n)	do { } while (0)
+#endif
+
 static void led_stage(enum boox_stage stage, bool use_timer)
 {
 	led_rhythm_run(&boox_rhythms[stage], use_timer);
@@ -195,6 +215,10 @@ static void led_stage(enum boox_stage stage, bool use_timer)
 int board_early_init_f(void)
 {
 	led_init();
+
+	/* 6: U-Boot proper is executing from DRAM. */
+	BOOX_STEP(6);
+
 	led_stage(BOOX_EARLY_INIT_F, false);
 	return 0;
 }
@@ -205,6 +229,10 @@ int board_early_init_f(void)
 int dram_init(void)
 {
 	int ret = fdtdec_setup_mem_size_base();
+
+	/* 7: the device tree parsed and DRAM was sized. */
+	BOOX_STEP(7);
+
 
 	if (!ret)
 		led_stage(BOOX_DRAM_INIT, false);
@@ -220,6 +248,9 @@ int dram_init_banksize(void)
 #ifdef CONFIG_MISC_INIT_R
 int misc_init_r(void)
 {
+	/* 8: relocation and the driver model survived. */
+	BOOX_STEP(8);
+
 	env_set("board", "boox-c67ml");
 	led_stage(BOOX_MISC_INIT_R, true);
 	return 0;
@@ -261,6 +292,9 @@ static void __noreturn led_rhythm_forever(const struct led_rhythm *r,
  */
 static int boox_last_stage(void)
 {
+	/* 9: end of U-Boot init, about to hand to bootcmd. */
+	BOOX_STEP(9);
+
 	/*
 	 * Bring-up build: stop here and blink forever rather than booting.
 	 * See led_rhythm_forever() for how to re-enable distroboot.
