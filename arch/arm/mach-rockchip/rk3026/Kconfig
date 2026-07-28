@@ -35,7 +35,13 @@ config SYS_SOC
 	default "rk3026"
 
 config SYS_MALLOC_F_LEN
-	default 0x400
+	# 0x400 (copied from rk3036) is NOT enough for this board: pre-relocation
+	# dm_init_and_scan() exhausts it and returns -ENOMEM, initf_dm propagates
+	# that, the INITCALL fails and U-Boot calls hang() -- which spins with the
+	# LED untouched, so it looks exactly like a lock-up rather than an error.
+	# PROVEN on hardware 2026-07-28: with 0x400 the board never reaches
+	# board_early_init_f; with 0x2000 it does.
+	default 0x2000
 
 config SPL_SERIAL
 	default y
