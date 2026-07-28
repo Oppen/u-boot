@@ -108,11 +108,15 @@ static void led_set(bool on)
  * 0xC0 = 192). The vendor DDR blob's own "if (*(u32*)0x10080000 == 0xC0)" is
  * that same check, so the clocks are already up by the time we run.
  *
- * Empirically ~4 cycles per iteration of this loop, so 48000 iterations is
- * about 1 ms at 192 MHz. Slow by a factor of a few is harmless for a blink;
- * being 40x out either way is what made an earlier build blink invisibly.
+ * MEASURED, 2026-07-28, and it contradicts the 192 MHz figure above: a raw
+ * volatile spin of 3,000,000 iterations in the SPL took 10-20 s on hardware,
+ * i.e. ~200k iterations/second. So one millisecond is ~200 iterations, not
+ * 48000 -- the old constant made every pattern ~240x too long, which is why
+ * later boot stages looked like a dead LED (docs/PENDING.md H5). Whether the
+ * cause is a core clock far below 192 MHz or very slow memory is open (H6);
+ * either way this constant now comes from the stopwatch, not from arithmetic.
  */
-#define LED_SPIN_PER_MS	48000
+#define LED_SPIN_PER_MS	200
 
 static void led_delay_spin_ms(u32 ms)
 {
@@ -213,7 +217,7 @@ static void boox_step_spin(u32 n)
  * indistinguishable from a hang just before the step, which made every result
  * past step 6 unprovable.
  */
-#define BOOX_STEP_SPIN	3000000
+#define BOOX_STEP_SPIN	100000
 
 #ifdef UBOOT_CURRENT_STEP
 #define BOOX_STEP(n)						\

@@ -222,9 +222,12 @@ static void spl_led_rhythm(const u16 *ms, unsigned int n)
  * board/rockchip/boox-c67ml/boox-c67ml.c.
  */
 /*
- * Raw spin, for signalling only. Not a delay primitive: no timer, no udelay(),
- * no calibration claim. The count is picked to be visible whatever the clock
- * is -- an order of magnitude either way still reads as blinking.
+ * Raw spin, for signalling only. Not a delay primitive: no timer, no udelay().
+ *
+ * Count is set from a MEASUREMENT, not an assumption: 3,000,000 iterations took
+ * 10-20 s on hardware (2026-07-28), i.e. ~200k iterations/second, so 100,000 is
+ * about half a second per half-cycle. An order of magnitude either way still
+ * reads as blinking, which is all this has to survive.
  */
 static void spl_spin(u32 n)
 {
@@ -245,7 +248,7 @@ static void spl_spin(u32 n)
  * Steps 1-5 are the SPL; 6+ are U-Boot proper, in
  * board/rockchip/boox-c67ml/boox-c67ml.c.
  */
-#define SPL_STEP_SPIN	3000000
+#define SPL_STEP_SPIN	100000
 
 #ifdef UBOOT_CURRENT_STEP
 #define BOOX_STEP(n)						\
