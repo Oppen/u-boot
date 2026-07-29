@@ -483,13 +483,17 @@ int uclass_get_device_by_driver(enum uclass_id id,
 /*
  * Steps 64/65 bisect the return path out of device_probe(cru), which step 63
  * reaches ("about to return") while steps 58 and 69 -- three statements later --
- * stay solid. Gated on the device itself, not boox_scope, so the global is not
- * part of the claim.
+ * stay solid.
+ *
+ * boox_scope is part of the gate: the first cut tested the device alone, and a
+ * marker blinks forever, so it halted at whichever consumer probed the CRU
+ * first and said nothing about the SD's lookup -- the same defect that made
+ * 61/63 read as contradictory.
  */
 #ifdef UBOOT_CURRENT_STEP
 static bool boox_dev_is_cru(struct udevice *dev)
 {
-	return dev && dev->name && strstr(dev->name, "20000000");
+	return dev && dev->name && strstr(dev->name, "20000000") && boox_scope;
 }
 #endif
 
@@ -502,6 +506,13 @@ int uclass_get_device_tail(struct udevice *dev, int ret, struct udevice **devp)
 	ret = device_probe(dev);
 
 	BOOX_STEP_AT_IF(64, boox_dev_is_cru(dev));	/* CRU: device_probe returned into the tail */
+	/*
+	 * Same point, but no dereference: 64/65 both read dev->name through
+	 * strstr, so their "solid" cannot tell "control never returned" from
+	 * "control returned and dev->name no longer reads back". This one only
+	 * tests the scope flag.
+	 */
+	BOOX_STEP_AT_IF(66, boox_scope);		/* SD-scoped: back in the tail at all */
 
 	if (ret)
 		return ret;
