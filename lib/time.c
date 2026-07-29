@@ -105,6 +105,9 @@ uint64_t notrace get_ticks(void)
 		BOOX_STEP_AT_R(82);		/* about to call dm_timer_init() */
 		ret = dm_timer_init();
 		BOOX_STEP_AT_R(83);		/* it RETURNED */
+		/* 84 reports the value: match = probed, mismatch = error. 83
+		 * only proves it returned -- its marker precedes this check. */
+		BOOX_REPORT(84, ret == 0);
 		if (ret)
 			panic("Could not initialize timer (err %d)\n", ret);
 	}
