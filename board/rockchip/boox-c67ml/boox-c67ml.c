@@ -269,6 +269,61 @@ int board_early_init_f(void)
 #endif
 
 /* board_init() is provided by the shared arch/arm/mach-rockchip/board.c */
+
+#if CONFIG_IS_ENABLED(USB_GADGET_DWC2_OTG)
+/*
+ * OTG PHY bring-up, overriding the __weak no-op in
+ * drivers/usb/gadget/dwc2_udc_otg.c:166. UNPROVEN on hardware.
+ *
+ * Nothing in our build touched the PHY before this: CONFIG_ROCKCHIP_USB2_PHY is
+ * off, and enabling it would hang() -- its match table has no rk3026 entry.
+ *
+ * Every value below is read out of Rockchip's own rk30usbplug device-mode blob
+ * (docs/re/USBPLUG-RE.md) -- EVIDENCE TIER: vendor blob, not measurement. The
+ * vendor kernel's PHY path (docs/re/VENDOR-KERNEL-USB.md) writes a DIFFERENT
+ * register set (GRF+0x280/0x288 in hw_init, GRF+0x17c/+0x194 in soft_reset).
+ * That conflict is unresolved, so only the device-mode blob's sequence is
+ * replicated here -- it is the one that demonstrably enumerates this SoC as a
+ * USB device.
+ *
+ * Clock gates first, and that ordering is not cosmetic: reading a clock-gated
+ * block hangs this bus.
+ */
+#define CRU_CLKGATE_CON1	(CRU_BASE + 0xd4)
+#define CRU_CLKGATE_CON5	(CRU_BASE + 0xe4)
+#define CRU_SOFTRST_CON4	(CRU_BASE + 0x120)
+#define GRF_UOC1_CON4		0x20008190
+
+/* CRU gate/reset registers take a hiword write mask: mask bit set, value bit
+ * clear = ungate. */
+#define GATE_HCLK_OTG0		BIT(29)		/* CLKGATE_CON5 bit 13 */
+#define GATE_OTGPHY0		BIT(21)		/* CLKGATE_CON1 bit 5 */
+
+void otg_phy_init(struct dwc2_udc *dev)
+{
+	/* AHB clock to 0x10180000 first, then the PHY clock. Vendor order. */
+	writel(GATE_HCLK_OTG0, (void __iomem *)CRU_CLKGATE_CON5);
+	writel(GATE_OTGPHY0, (void __iomem *)CRU_CLKGATE_CON1);
+
+	/*
+	 * Hiword-masked clear of UOC1_CON4 bits 10/12/13. Bits 12:13 are the OTG
+	 * D+/D- mux the vendor kernel labels "usb otg dp/dm switch to usb phy".
+	 */
+	writel(0x34000000, (void __iomem *)GRF_UOC1_CON4);
+
+	/* Assert USBOTG0 + USBPHY0 + OTGC0 together, then release. The vendor
+	 * waits 1100/1000/100 us; these spins are longer, and delays are minimums. */
+	writel(0x00e000e0, (void __iomem *)CRU_SOFTRST_CON4);
+	led_delay_spin_ms(3);
+	writel(0x00e00000, (void __iomem *)CRU_SOFTRST_CON4);
+	led_delay_spin_ms(3);
+}
+
+void otg_phy_off(struct dwc2_udc *dev)
+{
+	writel(0x00e000e0, (void __iomem *)CRU_SOFTRST_CON4);
+}
+#endif
 int dram_init(void)
 {
 	int ret = fdtdec_setup_mem_size_base();
