@@ -674,6 +674,36 @@ static void initcall_run_r(void)
 		BOOX_REPORT(78, t1 != t0);
 	}
 #endif
+#if defined(UBOOT_CURRENT_STEP) && UBOOT_CURRENT_STEP == 85
+	/*
+	 * Step 78 went dark even with clock-frequency = <24000000> on the DT
+	 * node, so clock_rate was not the wedge. Next suspect: nothing ungates
+	 * the timer. clk_rk3026.c has no .enable/.disable ops at all, and
+	 * rockchip_timer_start() writes CTRL/LOAD during probe -- a gated APB
+	 * write hangs the bus, which is indistinguishable from a hang.
+	 *
+	 * Same two gates step 81 poked (CLKGATE_CON1 b0 timer0, CON7 b7
+	 * pclk_timer0, docs/re/CRU-GATES.md), in the same order, opened BEFORE
+	 * the first get_timer() forces the probe. Diagnostic and candidate fix
+	 * in one boot:
+	 *   long on   = gating was the cause; the fix is gate ops in the clk driver
+	 *   dark      = it is not gating; bisect inside rockchip_timer_probe next
+	 *   long dark = probes fine, counter static
+	 */
+	{
+		ulong t0, t1;
+		volatile u32 i;
+
+		boox_probe_led(0);
+		writel(BIT(16), (void __iomem *)0x200000d4);
+		writel(BIT(23), (void __iomem *)0x200000ec);
+		t0 = get_timer(0);
+		for (i = 0; i < 20000000; i++)
+			;
+		t1 = get_timer(0);
+		BOOX_REPORT(85, t1 != t0);
+	}
+#endif
 #if defined(UBOOT_CURRENT_STEP) && UBOOT_CURRENT_STEP == 81
 	/*
 	 * The same question asked of the hardware, bypassing the driver model:
