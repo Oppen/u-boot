@@ -35,6 +35,9 @@ enum {
 
 #define DIV_TO_RATE(input_rate, div)	((input_rate) / ((div) + 1))
 
+/* Bound on the PLL lock poll; see rkclk_set_pll(). */
+#define PLL_LOCK_POLLS			100000
+
 #define PLL_DIVISORS(hz, _refdiv, _postdiv1, _postdiv2) {\
 	.refdiv = _refdiv,\
 	.fbdiv = (u32)((u64)hz * _refdiv * _postdiv1 * _postdiv2 / OSC_HZ),\
@@ -56,6 +59,7 @@ static int rkclk_set_pll(struct rk3026_cru *cru, enum rk_clk_id clk_id,
 	struct rk3026_pll *pll = &cru->pll[pll_id];
 	uint vco_hz = OSC_HZ / 1000 * div->fbdiv / div->refdiv * 1000;
 	uint output_hz = vco_hz / div->postdiv1 / div->postdiv2;
+	u32 i;
 
 	debug("PLL at %p: fbdiv=%d, refdiv=%d, postdiv1=%d, postdiv2=%d,\
 		 vco=%u Hz, output=%u Hz\n",
@@ -77,9 +81,25 @@ static int rkclk_set_pll(struct rk3026_cru *cru, enum rk_clk_id clk_id,
 	/* 18: reached the PLL lock wait (i.e. clk probe is running) */
 	BOOX_STEP_AT(18);
 
-	/* waiting for pll lock */
-	while (readl(&pll->con1) & (1 << PLL_LOCK_STATUS_SHIFT))
-		udelay(1);
+	/*
+	 * Wait for lock. The bit reads SET WHEN LOCKED: device tier, read under
+	 * Android where all four PLLs are necessarily locked and all four read
+	 * set (docs/PORT-FIXES.md §"the PLL lock-status test is INVERTED"), and
+	 * blob tier, the vendor exits on set (lsr #10, lsl #31, bne) and caps
+	 * its retries. Waiting *while* set, as this did, returned instantly
+	 * whenever the PLL was NOT locked -- so mode_con went to normal with an
+	 * unlocked PLL.
+	 *
+	 * Bounded, and deliberately WITHOUT udelay(): this runs inside the CRU
+	 * probe, and in U-Boot proper udelay() -> get_ticks() -> dm_timer_init()
+	 * re-enters device_probe() on the device being probed. The bound is a
+	 * raw poll count, not the vendor's 1000 tries -- its per-try cost is
+	 * unknown, so the two are not comparable. Unmeasured either way; the
+	 * only guarantee wanted here is that it terminates.
+	 */
+	for (i = 0; i < PLL_LOCK_POLLS; i++)
+		if (readl(&pll->con1) & (1 << PLL_LOCK_STATUS_SHIFT))
+			break;
 
 	/* 19: the PLL lock wait returned */
 	BOOX_STEP_AT(19);
