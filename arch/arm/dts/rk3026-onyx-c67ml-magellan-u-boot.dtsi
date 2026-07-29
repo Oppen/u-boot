@@ -36,4 +36,29 @@
 
 &sdmmc {
 	bootph-all;
+
+	/*
+	 * PIO, not IDMAC. Reached by ELIMINATION on hardware 2026-07-29, with
+	 * CONFIG_MMC_TRACE, after the clock was fixed and ruled out:
+	 *
+	 *  - clock: CLKSEL_CON11 now reads 0x277f (divider 63, no overflow) and
+	 *    the controller CLKDIV reads 2, so the card runs at ~258 kHz during
+	 *    identification -- inside the 400 kHz limit. The earlier 1.78 MHz
+	 *    overflow is fixed and ACMD51 still fails identically.
+	 *  - pads: GRF GPIO1A/B/C/D read 0/0x5000/0x5551/0x5555, matching the
+	 *    live Android values, so CMD/CLKOUT/D0..D3 are muxed FUNC1.
+	 *  - commands: CMD0, CMD8, ACMD41 (OCR 0xc0ff8000), CMD2, CMD3, CMD9,
+	 *    CMD7 (0x700) and every CMD55 all succeed.
+	 *  - data: ACMD51 SEND_SCR, the FIRST data transfer, returns -110
+	 *    ETIMEDOUT on all four retries.
+	 *
+	 * HCON reads 0x04c534c1, so DMA_INTERFACE = 1: the IDMAC engine is
+	 * present -- which is not the same as working. fifo-mode forces the PIO
+	 * path and is what rk3066a-mk808 and rk3188-radxarock (same dw_mshc
+	 * generation) do on every port; that is supporting evidence, not the
+	 * reason.
+	 *
+	 * UNPROVEN: not yet run on hardware.
+	 */
+	fifo-mode;
 };
