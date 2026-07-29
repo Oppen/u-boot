@@ -387,7 +387,18 @@
 
 &usb_otg {
 	status = "okay";
-	dr_mode = "host"; /* RTL8188EU WiFi dongle */
+	/*
+	 * "otg", not "host". 0x10180000 is the external micro-USB port; the
+	 * RTL8188EU WiFi is on the host-only controller at 0x101c0000. With
+	 * "host" here, board_usb_init() (arch/arm/mach-rockchip/board.c:251)
+	 * accepts neither of our dwc2 nodes, returns -ENODEV before
+	 * dwc2_udc_probe(), and the ACM gadget silently never starts -- which is
+	 * what made otg_phy_init() and step probes 76/77 unreachable code.
+	 *
+	 * The canonical dts/rk3026-onyx-c67ml-magellan.dts already said "otg";
+	 * this copy, which is the one that BUILDS, was stale.
+	 */
+	dr_mode = "otg";
 };
 
 &sdmmc {
