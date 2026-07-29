@@ -600,7 +600,12 @@ static int run_main_loop(void)
  * forever off a raw spin: no timer, no delay primitive, positive signal.
  */
 #ifdef UBOOT_CURRENT_STEP
-static void boox_r_blink(void)
+/*
+ * noinline so the marker survives as a real `bl` that
+ * scripts/build-step-images.sh can verify. Inlined, it left the card with no
+ * detectable call site and the build was refused as markerless.
+ */
+static noinline void boox_r_blink(void)
 {
 	volatile u32 i;
 
@@ -773,6 +778,12 @@ static void initcall_run_r(void)
 	INITCALL(pci_init);
 #endif
 	INITCALL(stdio_add_devices);
+	/*
+	 * This is where the USB ACM console is created: stdio_add_devices() calls
+	 * drv_usbacm_init() (common/stdio.c:358), which runs dwc2_udc_probe() via
+	 * board_usb_init(). If the gadget wedges the bus, it wedges here.
+	 */
+	BOOX_R_STEP(71);		/* stdio_add_devices done -- usbacm registered */
 	INITCALL(jumptable_init);
 #if CONFIG_IS_ENABLED(API)
 	INITCALL(api_init);
@@ -796,6 +807,7 @@ static void initcall_run_r(void)
 	INITCALL(kgdb_init);
 #endif
 	INITCALL(interrupt_init);
+	BOOX_R_STEP(72);		/* interrupt_init done */
 #if defined(CONFIG_MICROBLAZE) || defined(CONFIG_M68K)
 	INITCALL(timer_init);		/* initialize timer */
 #endif
@@ -815,7 +827,16 @@ static void initcall_run_r(void)
 	INITCALL(initr_post);
 #endif
 	WATCHDOG_RESET();
+	BOOX_R_STEP(73);		/* board_late_init done, before the last-stage event */
+	BOOX_R_STEP(75);		/* same point; 73 was consumed before initr_net was removed */
 	INITCALL_EVT(EVT_LAST_STAGE_INIT);
+	/*
+	 * The last marker before the main loop. It matters for USB: the ACM
+	 * gadget only enumerates while the console is polled, and nothing polls
+	 * until run_main_loop(). A card halting in any earlier marker can never
+	 * show up on a host.
+	 */
+	BOOX_R_STEP(74);		/* about to enter run_main_loop */
 #if defined(CFG_PRAM)
 	INITCALL(initr_mem);
 #endif

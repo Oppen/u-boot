@@ -269,7 +269,6 @@ int board_early_init_f(void)
 #endif
 
 /* board_init() is provided by the shared arch/arm/mach-rockchip/board.c */
-
 int dram_init(void)
 {
 	int ret = fdtdec_setup_mem_size_base();
@@ -340,10 +339,17 @@ static int boox_last_stage(void)
 	BOOX_STEP(9);
 
 	/*
-	 * Bring-up build: stop here and blink forever rather than booting.
-	 * See led_rhythm_forever() for how to re-enable distroboot.
+	 * One dwell, then RETURN, so board_init_r reaches run_main_loop().
+	 * That matters beyond tidiness: the USB ACM gadget only enumerates while
+	 * something polls the console, and nothing polls before the main loop --
+	 * so halting here made a USB console impossible to observe.
+	 *
+	 * Spin delays, not mdelay(): this rhythm previously ran with use_timer =
+	 * true, and with the timebase unverified a dead get_timer() blocks inside
+	 * the first delay and leaves the LED at a fixed level -- indistinguishable
+	 * from a crash.
 	 */
-	led_rhythm_forever(&boox_rhythms[BOOX_LAST_STAGE], true);
+	led_rhythm_run(&boox_rhythms[BOOX_LAST_STAGE], false);
 
 	return 0;
 }
