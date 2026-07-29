@@ -38,8 +38,23 @@ CONFIG_SPL_TEXT_BASE=0x10080800
 # SPL small enough for internal SRAM.
 # CONFIG_SPL_FRAMEWORK is not set
 # Back-to-BROM: the mask ROM (not the SPL) loads U-Boot proper, so the SPL
-# needs NO MMC/block/DM stack — it only inits UART+timer and returns. Keeping
-# SPL_MMC off avoids dragging in malloc_simple/bounce_buffer/part_init.
+# needs no MMC stack of its own — it inits UART+timer, trains DRAM, returns.
+#
+# MEASURED 2026-07-29, and it contradicts what this file used to claim: the two
+# negations below DO NOT TAKE. The built .config has CONFIG_SPL_DM=y and
+# CONFIG_SPL_BLK=y, and the SPL links uclass.c and blk-uclass.c. The SPL is not
+# DM-free; it is DM-INERT, because SPL_FRAMEWORK=n and nothing calls spl_init().
+# Six negations in this file are inert the same way: SPL_DM, SPL_BLK, DM_MMC,
+# CMD_FAT, CMD_EXT4, CMD_FS_GENERIC. DM_MMC in particular cannot be negated from
+# a defconfig at all — it is a non-prompted bool that MMC selects, and MMC is
+# `default ARM`. Turning MMC itself off does work: -12,296 B of u-boot.bin.
+#
+# Consequence for the SPL timebase: SPL_TIMER's deps (TIMER && SPL && SPL_DM)
+# are already satisfied. Enabling it links, at +368 B (3872 -> 4240 of a 6144 B
+# window). It is NOT a size problem. What blocks a working SPL DM timer is
+# SPL_OF_CONTROL: it pulls drivers/core/device.c's calloc, which is not linked
+# into this SPL, and neither SPL_SYS_MALLOC_SIMPLE nor SPL_SYS_MALLOC resolved
+# it. Without a DT in the SPL, SPL_TIMER links but binds nothing.
 # CONFIG_SPL_MMC is not set
 # CONFIG_SPL_BLK is not set
 # CONFIG_SPL_DM is not set

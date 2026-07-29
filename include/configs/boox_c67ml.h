@@ -13,8 +13,14 @@
 /*
  * SPL timebase.
  *
- * This SPL is deliberately DM-free, so CONFIG_SPL_TIMER (which needs SPL_DM) is
- * unavailable and lib/time.c takes its pre-driver-model path. Giving it these
+ * RETRACTED 2026-07-29: this said "the SPL is deliberately DM-free, so
+ * CONFIG_SPL_TIMER (which needs SPL_DM) is unavailable". Both halves are false.
+ * The built .config has CONFIG_SPL_DM=y despite the defconfig negating it, so
+ * SPL_TIMER's deps are satisfied and it links at +368 B of a 6144 B window
+ * (measured). The SPL is DM-inert, not DM-free. What actually blocks a working
+ * SPL DM timer is SPL_OF_CONTROL, which fails to link on device.c's calloc.
+ *
+ * lib/time.c takes its pre-driver-model path here. Giving it these
  * three values is all that is required: it then supplies timer_read_counter(),
  * get_ticks() with 32->64-bit rollover, and a __udelay() whose usec_to_tick()
  * is 64-bit and whose "tmp + 1" guarantees at least one tick for sub-tick
