@@ -96,6 +96,13 @@ CONFIG_SYSCON=y
 CONFIG_REGMAP=y
 CONFIG_CLK=y
 # Cortex-A9 has no arch timer: use the Rockchip DM timer in U-Boot proper.
+# No Ethernet exists on this board -- not a port, not a PHY, not a USB NIC in
+# the boot path -- yet CONFIG_NET/NETDEVICES are upstream defaults, and
+# initr_net runs inside board_init_r (board_r.c:823), in the window where the
+# boot currently dies.
+# CONFIG_NET is not set
+# CONFIG_NET_LEGACY is not set
+# CONFIG_NETDEVICES is not set
 # ADC and the Rockchip SARADC are upstream defaults, not something this board
 # asked for, and they are NOT inert: setup_boot_mode() -> rockchip_dnl_key_pressed()
 # (arch/arm/mach-rockchip/boot_mode.c:40) walks UCLASS_ADC and single-shots
