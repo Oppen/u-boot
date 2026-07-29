@@ -249,8 +249,17 @@ static uint32_t rkclk_pll_get_rate(struct rk3026_cru *cru,
 
 /*
  * SD/MMC clock.  On RK3026 the source mux is a single bit selecting cpll(0)
- * or gpll(1).  We always run from gpll (== cpll == 594 MHz here).  The DW MMC
+ * or gpll(1).  We always run from gpll, as the vendor does.  The DW MMC
  * controller halves the source internally, hence the extra /2.
+ *
+ * Selecting cpll would be wrong here, and not merely suboptimal: no stage of the
+ * vendor bootloader programs or enables CPLL, and a device read at our own U-Boot
+ * prompt confirms it -- MODE_CON = 0x1011 has the CPLL field in SLOW mode while
+ * its CON0/CON1 still hold Android's 560 MHz configuration, because a warm reset
+ * does not clear PLL_CON. So cpll reads as configured-but-bypassed: 24 MHz.
+ *
+ * gpll is 132 MHz at this stage (not the 594 MHz an earlier comment claimed), so
+ * rates are computed from the live PLL rate rather than a constant.
  */
 static ulong rockchip_mmc_get_clk(struct rk3026_cru *cru, uint gpll_rate,
 				  int periph)
