@@ -77,8 +77,20 @@ CONFIG_SPL_HAVE_INIT_STACK=y
 CONFIG_BOARD_EARLY_INIT_F=y
 CONFIG_LAST_STAGE_INIT=y
 CONFIG_MISC_INIT_R=y
-CONFIG_CMD_USB=y
-CONFIG_CMD_USB_MASS_STORAGE=y
+# USB HOST stack off; the GADGET below stays. Not merely unused: dwc2.c skips a
+# node only for dr_mode == "peripheral", ours says "otg", so the host driver
+# binds usb@10180000 and resets/programs the very core the ACM gadget needs
+# (docs/re/USBPLUG-RE.md). There is nothing to host on this board -- WiFi is a
+# kernel concern, and `ums` needs MMC, which is off too. Restore with MMC.
+#
+# CONFIG_USB itself must stay: the whole gadget menu, ACM console included, is
+# inside `if USB` (drivers/usb/Kconfig:35..188). Turning it off silently took the
+# console with it. DM_USB likewise -- USB_GADGET selects it.
+CONFIG_USB=y
+# CONFIG_USB_DWC2 is not set
+# CONFIG_USB_STORAGE is not set
+# CONFIG_CMD_USB is not set
+# CONFIG_CMD_USB_MASS_STORAGE is not set
 # Command tables and filesystem libraries: nothing here runs before the prompt,
 # and the boot does not reach a prompt yet. Re-add CONFIG_CMD_FAT ALONE once
 # there is a kernel to load -- U-Boot stays FAT-only and reads the zImage from a
@@ -144,10 +156,6 @@ CONFIG_PINCTRL=y
 # CONFIG_REGULATOR_ACT8865 is not set
 CONFIG_SYSRESET=y
 # CONFIG_SPL_SYSRESET is not set
-CONFIG_USB=y
-CONFIG_DM_USB=y
-CONFIG_USB_DWC2=y
-CONFIG_USB_STORAGE=y
 CONFIG_SPL_TINY_MEMSET=y
 # UEFI is an upstream default for armv7 (lib/efi_loader/Kconfig: "default y if
 # ... SYS_CPU = armv7"), not something this board asked for. We boot a zImage
