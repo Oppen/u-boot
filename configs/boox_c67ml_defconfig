@@ -77,15 +77,19 @@ CONFIG_SPL_HAVE_INIT_STACK=y
 CONFIG_BOARD_EARLY_INIT_F=y
 CONFIG_LAST_STAGE_INIT=y
 CONFIG_MISC_INIT_R=y
-CONFIG_CMD_GPT=y
-CONFIG_CMD_I2C=y
-CONFIG_CMD_MMC=y
 CONFIG_CMD_USB=y
 CONFIG_CMD_USB_MASS_STORAGE=y
-CONFIG_CMD_FAT=y
-CONFIG_CMD_EXT4=y
-CONFIG_CMD_FS_GENERIC=y
-CONFIG_CMD_CACHE=y
+# Command tables and filesystem libraries: nothing here runs before the prompt,
+# and the boot does not reach a prompt yet. Re-add CONFIG_CMD_FAT ALONE once
+# there is a kernel to load -- U-Boot stays FAT-only and reads the zImage from a
+# FAT partition. EXT4 does not come back with it.
+# CONFIG_CMD_GPT is not set
+# CONFIG_CMD_I2C is not set
+# CONFIG_CMD_MMC is not set
+# CONFIG_CMD_FAT is not set
+# CONFIG_CMD_EXT4 is not set
+# CONFIG_CMD_FS_GENERIC is not set
+# CONFIG_CMD_CACHE is not set
 CONFIG_OF_CONTROL=y
 CONFIG_ENV_IS_NOWHERE=y
 CONFIG_SYSCON=y
