@@ -48,8 +48,10 @@ enum {
 			 "divisors on line " __stringify(__LINE__));
 
 /* use integer mode */
+/* Both from the vendor DDR blob's set_pll calls: APLL (1,75,3,1) = 600 MHz,
+ * GPLL (1,33,6,1) = 132 MHz. refdiv, postdiv1, postdiv2 here; fbdiv derived. */
 static const struct pll_div apll_init_cfg = PLL_DIVISORS(APLL_HZ, 1, 3, 1);
-static const struct pll_div gpll_init_cfg = PLL_DIVISORS(GPLL_HZ, 2, 2, 1);
+static const struct pll_div gpll_init_cfg = PLL_DIVISORS(GPLL_HZ, 1, 6, 1);
 
 
 static int rkclk_set_pll(struct rk3026_cru *cru, enum rk_clk_id clk_id,
@@ -147,21 +149,26 @@ static void rkclk_init(struct rk3026_cru *cru)
 		     pclk_div << CORE_PERI_DIV_SHIFT);
 
 	/*
-	 * select gpll as pd_bus bus clock source and
-	 * set up dependent divisors for PCLK/HCLK and ACLK clocks.
+	 * pd_bus. The vendor sources aclk_cpu from APLL here (CLKSEL_CON0 bit
+	 * 13 = 0), not from GPLL -- GPLL is only 132 MHz at this stage.
+	 *
+	 * BUS_HCLK and BUS_PCLK divide BUS_ACLK, not the PLL. Dividing the PLL
+	 * is what the rk3036-derived version did, and with assert() compiled out
+	 * it programmed 3 and 7 where the vendor writes 0 and 1 -- silently, so
+	 * hclk/pclk came out 4x and 8x low.
 	 */
-	aclk_div = GPLL_HZ / BUS_ACLK_HZ - 1;
-	assert((aclk_div + 1) * BUS_ACLK_HZ == GPLL_HZ && aclk_div <= 0x1f);
+	aclk_div = APLL_HZ / BUS_ACLK_HZ - 1;
+	assert((aclk_div + 1) * BUS_ACLK_HZ == APLL_HZ && aclk_div <= 0x1f);
 
-	pclk_div = GPLL_HZ / BUS_PCLK_HZ - 1;
-	assert((pclk_div + 1) * BUS_PCLK_HZ == GPLL_HZ && pclk_div <= 0x7);
+	pclk_div = BUS_ACLK_HZ / BUS_PCLK_HZ - 1;
+	assert((pclk_div + 1) * BUS_PCLK_HZ == BUS_ACLK_HZ && pclk_div <= 0x7);
 
-	hclk_div = GPLL_HZ / BUS_HCLK_HZ - 1;
-	assert((hclk_div + 1) * BUS_HCLK_HZ == GPLL_HZ && hclk_div <= 0x3);
+	hclk_div = BUS_ACLK_HZ / BUS_HCLK_HZ - 1;
+	assert((hclk_div + 1) * BUS_HCLK_HZ == BUS_ACLK_HZ && hclk_div <= 0x3);
 
 	rk_clrsetreg(&cru->cru_clksel_con[0],
 		     BUS_ACLK_PLL_SEL_MASK | BUS_ACLK_DIV_MASK,
-		     BUS_ACLK_PLL_SEL_GPLL << BUS_ACLK_PLL_SEL_SHIFT |
+		     BUS_ACLK_PLL_SEL_APLL << BUS_ACLK_PLL_SEL_SHIFT |
 		     aclk_div << BUS_ACLK_DIV_SHIFT);
 
 	rk_clrsetreg(&cru->cru_clksel_con[1],
