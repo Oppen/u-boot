@@ -25,16 +25,12 @@
 # Defaults that are already off, so they need no line here, with the reasons
 # worth keeping (each was established the hard way):
 #
-#   MMC / DM_MMC / MMC_DW / MMC_DW_ROCKCHIP — the BootROM reads the card and
-#     streams stage 2 into DRAM itself, so U-Boot needs no storage driver until
-#     there is a kernel to load. Note initr_mmc (board_r.c:748) runs BEFORE
-#     console_init_r (:780), so a dwmmc probe hanging in the CRU clock lookup
-#     makes the USB ACM console unreachable. DM_MMC cannot be negated from a
-#     defconfig anyway: non-prompted bool, selected by MMC, MMC is `default ARM`.
-#     Turning MMC itself off is worth -12,296 B of u-boot.bin (measured).
-#   CMD_FAT / CMD_EXT4 / CMD_FS_GENERIC / CMD_MMC / CMD_USB / CMD_GPT / CMD_I2C —
-#     nothing here runs before the prompt and the boot does not reach one. Re-add
-#     CMD_FAT ALONE once there is a zImage to load; EXT4 does not come with it.
+#   CMD_EXT4 / CMD_FS_GENERIC / CMD_USB / CMD_GPT / CMD_I2C — not needed to load a
+#     zImage. U-Boot stays FAT-only; EXT4 does not come back with CMD_FAT.
+#     (MMC and CMD_FAT/CMD_MMC were re-enabled 2026-07-29 -- see the MMC block
+#     below. DM_MMC cannot be negated from a defconfig anyway: non-prompted bool,
+#     selected by MMC, and MMC is `default ARM`. Turning MMC fully off was worth
+#     -12,296 B of u-boot.bin, measured, if it ever needs to go again.)
 #   USB_DWC2 (host) — dwc2.c skips a node only for dr_mode == "peripheral", and
 #     ours says "otg", so the host driver would bind usb@10180000 and reset the
 #     very core the ACM gadget needs (docs/re/USBPLUG-RE.md).
@@ -44,10 +40,15 @@
 #     rockchip_dnl_key_pressed() (mach-rockchip/boot_mode.c:40) walks UCLASS_ADC
 #     and probes the SARADC inside board_late_init, in the window where the boot
 #     currently dies. Page-turn ladder keys are a kernel concern.
-#   SYS_I2C_ROCKCHIP / DM_PMIC / PMIC_ACT8865 / REGULATOR_ACT8865 — nothing
-#     consults them before the failure: board_init is empty, no power_init_board
-#     is defined, and the sdmmc node has no vmmc-supply. VCC_SD (LDO3) is left as
-#     the vendor path left it. Restore when the panel or charger needs a rail.
+#   SYS_I2C_ROCKCHIP / DM_PMIC / PMIC_ACT8865 / REGULATOR_ACT8865 — board_init is
+#     empty and no power_init_board is defined, so nothing drives a rail. The
+#     sdmmc node DOES declare vmmc-supply = <&act_ldo3> and vqmmc-supply =
+#     <&vcc_io> (rk3026-onyx-c67ml-magellan.dts:425), but with DM_REGULATOR off
+#     those phandles are inert and the controller probes without asking for a
+#     regulator. VCC_SD (LDO3) is left as the vendor path left it. Restore this
+#     group when the panel or charger needs a rail -- or if the card turns out to
+#     need VCC_SD cycled, which is the working theory for why a pin reset skips
+#     the SD boot path (docs/HOW-TO.md §5a2).
 #   NET_LEGACY / NETDEVICES — no Ethernet exists on this board at all.
 #   SYS_ARCH_TIMER — Cortex-A9, no architected timer to enable.
 # ---------------------------------------------------------------------------
@@ -161,3 +162,15 @@ CONFIG_USB_GADGET_DWC2_OTG=y
 CONFIG_USB_FUNCTION_ACM=y
 CONFIG_SYS_TIMER_COUNTS_DOWN=y
 CONFIG_SPL_TINY_MEMSET=y
+# MMC, re-enabled 2026-07-29. It was off because initr_mmc (board_r.c:748) runs
+# BEFORE console_init_r (:780) and the dwmmc probe hung in the CRU clock lookup,
+# which made the USB ACM console unreachable. That hang was the timer wedge --
+# BUS_PCLK/BUS_HCLK misprogrammed off an unlocked PLL -- and get_timer() is now
+# confirmed working on hardware (docs/BLOCKERS.md). MMC is what lets U-Boot read
+# a zImage off the FAT partition, so this is the step from "we have a prompt" to
+# "we can boot a kernel". Verify at the prompt with `mmc info` and `fatls mmc 0:1`.
+# CMD_FAT needs no line: it is implied once FS_FAT comes in, and savedefconfig
+# drops it. fatls/fatload are present -- verified in the built .config.
+CONFIG_MMC_DW=y
+CONFIG_MMC_DW_ROCKCHIP=y
+CONFIG_CMD_MMC=y
