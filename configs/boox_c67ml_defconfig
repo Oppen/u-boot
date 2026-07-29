@@ -105,15 +105,20 @@ CONFIG_DM_MMC=y
 CONFIG_MMC_DW=y
 CONFIG_MMC_DW_ROCKCHIP=y
 # CONFIG_SPL_DM_SERIAL is not set
-CONFIG_SYS_I2C_ROCKCHIP=y
-CONFIG_DM_I2C=y
+# I2C, the ACT8931 PMIC and its regulators. Nothing consults them before the
+# failure: board_init is empty here, no board code defines power_init_board, and
+# the sdmmc node has no vmmc-supply, so the SD controller probes without asking
+# for a regulator. VCC_SD (LDO3) is left as the vendor path left it -- U-Boot
+# never drove it. Restore this group when the panel or charger needs a rail.
+# CONFIG_SYS_I2C_ROCKCHIP is not set
+# CONFIG_DM_I2C is not set
 # CONFIG_SPL_DM_I2C is not set
-CONFIG_DM_PMIC=y
+# CONFIG_DM_PMIC is not set
 # CONFIG_SPL_DM_PMIC is not set
-CONFIG_PMIC_ACT8865=y
-CONFIG_DM_REGULATOR=y
+# CONFIG_PMIC_ACT8865 is not set
+# CONFIG_DM_REGULATOR is not set
 # CONFIG_SPL_DM_REGULATOR is not set
-CONFIG_REGULATOR_ACT8865=y
+# CONFIG_REGULATOR_ACT8865 is not set
 CONFIG_SYSRESET=y
 # CONFIG_SPL_SYSRESET is not set
 CONFIG_USB=y
