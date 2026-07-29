@@ -27,6 +27,7 @@
 #include <asm/arch-rockchip/hardware.h>
 #include <asm/arch-rockchip/sdram_rk3026.h>
 #include <asm/arch-rockchip/timer.h>
+#include <spl.h>
 
 /*
  * Delays.
@@ -473,9 +474,30 @@ void board_init_f(ulong dummy)
 	back_to_bootrom(BROM_BOOT_NEXTSTAGE);
 }
 
-/* Placeholder: board_init_r never runs (back_to_bootrom does not return). */
+/*
+ * Placeholder: board_init_r never runs (back_to_bootrom does not return).
+ *
+ * Omitted when SPL_FRAMEWORK is on, which supplies its own in common/spl/spl.c
+ * -- otherwise the two collide at link time. Enabling the framework is what
+ * unlocks SPL_SYS_MALLOC_F, hence calloc, hence a device tree and driver model
+ * in the SPL.
+ */
+#if !CONFIG_IS_ENABLED(FRAMEWORK)
 void board_init_r(gd_t *id, ulong dest_addr)
 {
 	while (1)
 		;
 }
+#else
+/*
+ * The framework asks the board where it booted from. Ours never loads anything:
+ * back_to_bootrom() hands control to the mask ROM, which streams stage 2 into
+ * DRAM itself. mach-rockchip/spl.c has an implementation of this, but it is
+ * gated on SPL_ROCKCHIP_COMMON_BOARD, which would also bring its own
+ * board_init_f and collide with ours.
+ */
+u32 spl_boot_device(void)
+{
+	return BOOT_DEVICE_BOOTROM;
+}
+#endif
