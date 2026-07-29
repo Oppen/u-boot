@@ -53,6 +53,25 @@ static noinline void boox_blink(u32 spin)
 	}
 }
 
+/*
+ * Drive the LED to a known level and return. For probes whose risky operation
+ * must be bracketed: set the level first, and then "level unchanged forever"
+ * means the operation never came back, which is otherwise indistinguishable
+ * from never having reached the probe at all. The maintainer's two-boot test --
+ * one boot entered with the LED dark, one lit, both ending in the state they
+ * started in -- is what showed that an untouched LED carries no information.
+ */
+noinline void boox_probe_led(int on)
+{
+	writel(BIT(GATE_PCLK_GPIO2 + 16), (void __iomem *)CRU_GATE_CON8);
+	setbits_le32((void __iomem *)(GPIO2_BASE + GPIO_DDR), LED_BIT);
+
+	if (on)
+		setbits_le32((void __iomem *)(GPIO2_BASE + GPIO_DR), LED_BIT);
+	else
+		clrbits_le32((void __iomem *)(GPIO2_BASE + GPIO_DR), LED_BIT);
+}
+
 noinline void boox_step_blink(void)
 {
 	boox_blink(SPIN);
@@ -61,4 +80,42 @@ noinline void boox_step_blink(void)
 noinline void boox_step_blink_r(void)
 {
 	boox_blink(SPIN_CACHED);
+}
+
+/*
+ * Two-outcome probes: a register was read and the answer is reported by DUTY
+ * RATIO, never by rate. Rate is not judgeable by eye, and a wrong timebase
+ * scales every pattern by the same factor while leaving the ratio intact.
+ *
+ *   4:1 mostly lit, brief wink dark  -> the value MATCHED
+ *   1:4 mostly dark, brief tick lit  -> the value did NOT match
+ *   fixed level                      -> the read never returned: bus hang
+ */
+#define SPIN_UNIT	2000000
+
+static noinline void boox_blink_duty(u32 on, u32 off)
+{
+	volatile u32 i;
+
+	writel(BIT(GATE_PCLK_GPIO2 + 16), (void __iomem *)CRU_GATE_CON8);
+	setbits_le32((void __iomem *)(GPIO2_BASE + GPIO_DDR), LED_BIT);
+
+	while (1) {
+		setbits_le32((void __iomem *)(GPIO2_BASE + GPIO_DR), LED_BIT);
+		for (i = 0; i < on; i++)
+			;
+		clrbits_le32((void __iomem *)(GPIO2_BASE + GPIO_DR), LED_BIT);
+		for (i = 0; i < off; i++)
+			;
+	}
+}
+
+noinline void boox_step_blink_match(void)
+{
+	boox_blink_duty(4 * SPIN_UNIT, SPIN_UNIT);
+}
+
+noinline void boox_step_blink_mismatch(void)
+{
+	boox_blink_duty(SPIN_UNIT, 4 * SPIN_UNIT);
 }

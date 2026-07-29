@@ -19,8 +19,10 @@
 #include <event.h>
 #include <fdtdec.h>
 #include <init.h>
+#include <time.h>
 #include <asm/global_data.h>
 #include <asm/io.h>
+#include <boox_probe.h>
 #include <linux/bitops.h>
 #include <linux/delay.h>
 
@@ -197,44 +199,15 @@ enum boox_stage {
  * single unambiguous state that keeps until you look at it.
  */
 /*
- * Raw spin for signalling only -- no timer, no mdelay(), no calibration claim.
- * Sized to read as a blink across any plausible clock.
- */
-static void boox_step_spin(u32 n)
-{
-	volatile u32 i;
-
-	for (i = 0; i < n; i++)
-		;
-}
-
-/*
  * Step probe builds (-DUBOOT_CURRENT_STEP=N via KCFLAGS); the SPL half lives in
- * arch/arm/mach-rockchip/rk3026/rk3026-board-spl.c. Steps 1-5 are the SPL, 6-9
- * here.
+ * arch/arm/mach-rockchip/rk3026/rk3026-board-spl.c. Steps 6-9 are here.
  *
- * The marked step blinks FOREVER. Positive signal on purpose: ending dark was
- * indistinguishable from a hang just before the step, which made every result
- * past step 6 unprovable.
+ * Implementation is the shared one in common/boox_probe.c -- this file used to
+ * carry its own inline copy with a 100,000 spin. Steps 6 and 7 run before
+ * relocation with caches off, 8 and 9 after, hence the two variants.
  */
-#define BOOX_STEP_SPIN	100000
-
-#ifdef UBOOT_CURRENT_STEP
-#define BOOX_STEP(n)						\
-	do {							\
-		if ((n) == UBOOT_CURRENT_STEP) {		\
-			led_init();				\
-			while (1) {				\
-				led_set(true);			\
-				boox_step_spin(BOOX_STEP_SPIN);	\
-				led_set(false);			\
-				boox_step_spin(BOOX_STEP_SPIN);	\
-			}					\
-		}						\
-	} while (0)
-#else
-#define BOOX_STEP(n)	do { } while (0)
-#endif
+#define BOOX_STEP(n)	BOOX_STEP_AT(n)
+#define BOOX_STEP_R(n)	BOOX_STEP_AT_R(n)
 
 /*
  * T1: one switch for every rhythm here too. Off for step builds (T2), since a
@@ -317,6 +290,37 @@ void otg_phy_init(struct dwc2_udc *dev)
 	led_delay_spin_ms(3);
 	writel(0x00e00000, (void __iomem *)CRU_SOFTRST_CON4);
 	led_delay_spin_ms(3);
+
+	/*
+	 * Step 76 reads the controller's ID register back through the LED, which
+	 * is the only console this board has. Three OUTCOMES, by duty ratio:
+	 *
+	 *   4:1, long on, brief dark   GSNPSID matched -> the core is clocked and
+	 *                              readable, so the gates above are open
+	 *   1:4, long dark, brief on   the read returned something else
+	 *   fixed level                the read never came back: bus hang, still gated
+	 *
+	 * Expected value from the vendor blob (docs/re/USBPLUG-RE.md):
+	 * GSNPSID & ~0xfff == 0x4f542000.
+	 */
+#if defined(UBOOT_CURRENT_STEP) && UBOOT_CURRENT_STEP == 76
+	{
+		u32 id = readl((void __iomem *)(0x10180000 + 0x40));
+
+		BOOX_REPORT(76, (id & ~0xfffU) == 0x4f542000);
+	}
+#endif
+	/*
+	 * 79: GOTGCTL.CONID_B, the bit dwc2_core_reset() uses to decide whether
+	 * this is a host. If it reads 0 the driver sets host_mode = true and then
+	 * waits for GINTSTS_CURMODE_HOST, which cannot happen in device mode.
+	 *
+	 * match (long on) = CONID_B set, i.e. correctly seen as a B-device
+	 * mismatch (long dark) = clear, i.e. the driver will take the host path
+	 */
+#if defined(UBOOT_CURRENT_STEP) && UBOOT_CURRENT_STEP == 79
+	BOOX_REPORT(79, readl((void __iomem *)0x10180000) & BIT(16));
+#endif
 }
 
 void otg_phy_off(struct dwc2_udc *dev)
@@ -347,8 +351,30 @@ int dram_init_banksize(void)
 int misc_init_r(void)
 {
 	/* 8: relocation and the driver model survived. */
-	BOOX_STEP(8);
+	BOOX_STEP_R(8);
 
+	/*
+	 * 78: is the timebase alive AFTER relocation? Everything in dwc2 bounds
+	 * its waits with get_timer(), so a dead counter turns each
+	 * wait_for_bit_le32(..., 1000, false) into an infinite loop rather than a
+	 * timeout (include/wait_bit.h:45). BLOCKERS.md records the SPL counter at
+	 * 0x200440a0 as dead; the DM timer here is a different base.
+	 *
+	 * match (long on) = the counter moved across a spin, timeouts work
+	 * mismatch (long dark) = it never moved, every dwc2 wait hangs forever
+	 */
+	/*
+	 * 81: read timer0's counter DIRECTLY, bypassing the driver model, after
+	 * ungating it ourselves. Splits "the hardware counter is dead" from "our DM
+	 * timer path is broken". Gate bits from docs/re/CRU-GATES.md: timer0 =
+	 * CLKGATE_CON1 bit 0, pclk_timer0 = CLKGATE_CON7 bit 7 (hiword mask: mask
+	 * bit set + value bit clear = ungate). Register layout is the vendor blob's
+	 * (docs/re/USBPLUG-RE.md): LOAD0 +0x00, CURR +0x08, CTRL +0x10.
+	 *
+	 *   dark forever  the counter read wedged the bus
+	 *   long on       it advances -- hardware fine, our DM path is not
+	 *   long dark     static even when ungated and started by hand
+	 */
 	env_set("board", "boox-c67ml");
 	led_stage(BOOX_MISC_INIT_R, true);
 	return 0;
@@ -391,7 +417,7 @@ static void __noreturn led_rhythm_forever(const struct led_rhythm *r,
 static int boox_last_stage(void)
 {
 	/* 9: end of U-Boot init, about to hand to bootcmd. */
-	BOOX_STEP(9);
+	BOOX_STEP_R(9);
 
 	/*
 	 * One dwell, then RETURN, so board_init_r reaches run_main_loop().

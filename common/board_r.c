@@ -54,6 +54,7 @@
 #include <scsi.h>
 #include <serial.h>
 #include <stdio_dev.h>
+#include <time.h>
 #include <timer.h>
 #include <trace.h>
 #include <watchdog.h>
@@ -61,6 +62,7 @@
 #include <asm/sections.h>
 #include <dm/root.h>
 #include <dm/ofnode.h>
+#include <linux/bitops.h>
 #include <linux/compiler.h>
 #include <linux/err.h>
 #include <wdt.h>
@@ -595,41 +597,11 @@ static int run_main_loop(void)
 
 /*
  * BOOX step probes (-DUBOOT_CURRENT_STEP=N via KCFLAGS). Instrumentation only.
- * Step 7 (dram_init) blinks on hardware and step 8 (misc_init_r) does not, so
- * the failure is in relocation or the early half of board_init_r. Blinks
- * forever off a raw spin: no timer, no delay primitive, positive signal.
+ * These all run after initr_caches, so they take the cached-site variant; the
+ * implementation is the shared one in common/boox_probe.c. A local copy lived
+ * here and was the source of two false readings.
  */
-#ifdef UBOOT_CURRENT_STEP
-/*
- * noinline so the marker survives as a real `bl` that
- * scripts/build-step-images.sh can verify. Inlined, it left the card with no
- * detectable call site and the build was refused as markerless.
- */
-static noinline void boox_r_blink(void)
-{
-	volatile u32 i;
-
-	writel(BIT(11 + 16), (void __iomem *)0x200000f0);
-	setbits_le32((void __iomem *)(0x20084000 + 0x04), BIT(15));
-	/*
-	 * 5,000,000, not 100,000: these markers run after initr_caches, where the
-	 * same loop is orders of magnitude faster than in the uncached SPL. At
-	 * 100,000 step 31 was "almost invisible" -- and a blink that fast reads as
-	 * a steady dim LED, i.e. it would be misreported as "not reached".
-	 */
-	while (1) {
-		setbits_le32((void __iomem *)0x20084000, BIT(15));
-		for (i = 0; i < 5000000; i++)
-			;
-		clrbits_le32((void __iomem *)0x20084000, BIT(15));
-		for (i = 0; i < 5000000; i++)
-			;
-	}
-}
-#define BOOX_R_STEP(n)	do { if ((n) == UBOOT_CURRENT_STEP) boox_r_blink(); } while (0)
-#else
-#define BOOX_R_STEP(n)	do { } while (0)
-#endif
+#define BOOX_R_STEP(n)	BOOX_STEP_AT_R(n)
 
 static void initcall_run_r(void)
 {
@@ -671,6 +643,65 @@ static void initcall_run_r(void)
 #if CONFIG_IS_ENABLED(DM)
 	INITCALL(initr_dm);
 	BOOX_R_STEP(32);		/* post-reloc driver model up */
+	/*
+	 * Timebase probes, HERE and not in misc_init_r: since the dr_mode fix,
+	 * console_init_r() -> acm_stdio_start() wedges (step 77), and misc_init_r
+	 * runs after it -- so probes placed there were unreachable code and
+	 * reported nothing, twice.
+	 *
+	 * Both drive the LED DARK first, so "stays dark" means the read never
+	 * returned, as distinct from never arriving. Enter from LED-on with
+	 * scripts/reset.sh.
+	 */
+#if defined(UBOOT_CURRENT_STEP) && UBOOT_CURRENT_STEP == 78
+	/*
+	 * Does get_timer() work? dwc2 bounds every wait with it, and
+	 * wait_for_bit_le32() turns a static counter into an infinite loop rather
+	 * than a timeout (include/wait_bit.h:45).
+	 *   dark forever = the call never returned
+	 *   long on      = advanced across a bounded spin
+	 *   long dark    = static, so every dwc2 wait hangs
+	 */
+	{
+		ulong t0, t1;
+		volatile u32 i;
+
+		boox_probe_led(0);
+		t0 = get_timer(0);
+		for (i = 0; i < 20000000; i++)
+			;
+		t1 = get_timer(0);
+		BOOX_REPORT(78, t1 != t0);
+	}
+#endif
+#if defined(UBOOT_CURRENT_STEP) && UBOOT_CURRENT_STEP == 81
+	/*
+	 * The same question asked of the hardware, bypassing the driver model:
+	 * ungate timer0 (CLKGATE_CON1 bit 0) and pclk_timer0 (CON7 bit 7) per
+	 * docs/re/CRU-GATES.md, start it by hand, read the counter twice. Layout
+	 * from the vendor blob: LOAD0 +0x00, CURR +0x08, CTRL +0x10.
+	 *   long on   = hardware counts, so our DM timer path is the defect
+	 *   long dark = static even ungated and started by hand
+	 */
+	{
+		void __iomem *tmr = (void __iomem *)0x20044000;
+		u32 c0, c1;
+		volatile u32 i;
+
+		boox_probe_led(0);
+		writel(BIT(16), (void __iomem *)0x200000d4);
+		writel(BIT(23), (void __iomem *)0x200000ec);
+		writel(0, tmr + 0x10);
+		writel(0xffffffff, tmr + 0x00);
+		writel(0xffffffff, tmr + 0x04);
+		writel(1, tmr + 0x10);
+		c0 = readl(tmr + 0x08);
+		for (i = 0; i < 2000000; i++)
+			;
+		c1 = readl(tmr + 0x08);
+		BOOX_REPORT(81, c1 != c0);
+	}
+#endif
 #endif
 #if CONFIG_IS_ENABLED(ADDR_MAP)
 	INITCALL(init_addr_map);
