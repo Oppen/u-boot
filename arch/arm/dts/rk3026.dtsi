@@ -312,6 +312,14 @@
 		interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&cru PCLK_TIMER0>, <&xin24m>;
 		clock-names = "pclk", "timer";
+		/*
+		 * timer_pre_probe() asks the CRU for PCLK_TIMER0 first and
+		 * rk3026_clk_get_rate() has no case for it, so without this
+		 * property clock_rate stays 0 and timer_post_probe() rejects
+		 * the device. 24 MHz is device-measured (timer1 sampled 30 s
+		 * apart: 24,000,665 Hz).
+		 */
+		clock-frequency = <24000000>;
 	};
 
 	i2s: i2s@20034000 {
