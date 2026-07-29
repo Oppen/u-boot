@@ -67,7 +67,7 @@ CONFIG_CONSOLE_MUX=y
 CONFIG_DEFAULT_FDT_FILE="rk3026-onyx-c67ml-magellan.dtb"
 # CONFIG_DISPLAY_CPUINFO is not set
 # CONFIG_DISPLAY_BOARDINFO is not set
-CONFIG_DISPLAY_BOARDINFO_LATE=y
+# CONFIG_DISPLAY_BOARDINFO_LATE is not set
 # CONFIG_SPL_FRAMEWORK is not set
 CONFIG_SPL_NO_BSS_LIMIT=y
 CONFIG_SPL_HAVE_INIT_STACK=y
@@ -127,7 +127,8 @@ CONFIG_SPL_TINY_MEMSET=y
 # EVENT_DYNAMIC, LIB_UUID and CHARSET, adds efi_init_early + efi_memory_init to
 # board_init_r, and is part of why u-boot.img grew 844 -> 936 sectors.
 # CONFIG_EFI_LOADER is not set
-CONFIG_ERRNO_STR=y
+# Both are print-only, and there is no console before the failure.
+# CONFIG_ERRNO_STR is not set
 
 # USB CDC-ACM console. The OTG controller (usb@10180000, dwc2) is the only
 # bidirectional channel this board has without soldering to the UART leads.
