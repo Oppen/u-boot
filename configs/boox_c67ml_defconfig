@@ -174,3 +174,14 @@ CONFIG_SPL_TINY_MEMSET=y
 CONFIG_MMC_DW=y
 CONFIG_MMC_DW_ROCKCHIP=y
 CONFIG_CMD_MMC=y
+# No autoboot during bring-up: -1 means "never autoboot, wait for input", so the
+# prompt is always reachable.
+#
+# Learned the moment MMC came back, 2026-07-29. BOOTCOMMAND is "bootflow scan",
+# and with BOOTDELAY=2 that fired two seconds after the banner and scanned the
+# new mmc bootdev -- reading partitions and sitting in MMC retries, which
+# presented as an unresponsive console that would not take keystrokes. Before MMC
+# there was nothing to scan, so the same config dropped to a prompt immediately
+# and hid this. There is no kernel on the card yet, so autoboot has nothing to do
+# that is worth losing the prompt over; type `bootflow scan` when it is wanted.
+CONFIG_BOOTDELAY=-1
