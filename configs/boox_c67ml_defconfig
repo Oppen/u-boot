@@ -7,16 +7,59 @@
 # Storage note: the device's internal flash is RAW NAND behind a closed FTL
 # (no mainline driver), so real boot media is the microSD card via dwmmc.
 #
-# RK3026 is Cortex-A9: no ARM architected generic timer (CONFIG_SYS_ARCH_TIMER
-# must stay off), so U-Boot proper uses the DM Rockchip timer and the SPL uses
-# a local __udelay() over the same timer (rk3026-board-spl.c).
+# RK3026 is Cortex-A9: no ARM architected generic timer, so U-Boot proper uses
+# the DM Rockchip timer and the SPL uses a local __udelay() (rk3026-board-spl.c).
+#
+# ---------------------------------------------------------------------------
+# This file is now `make savedefconfig` canonical: every line below is one the
+# build actually needs. It was hand-maintained until 2026-07-29 and had drifted
+# to 199 lines, of which 138 were redundant or INERT. Six negations did nothing
+# at all -- SPL_DM, SPL_BLK, DM_MMC, CMD_FAT, CMD_EXT4, CMD_FS_GENERIC -- while
+# the file's comments asserted the opposite, which is how "the SPL is DM-free"
+# survived as a premise for months. Round-trip verified: regenerating .config
+# from this file gives a byte-identical .config.
+#
+# Keep it canonical. If you add a line, re-run savedefconfig and re-add comments
+# rather than appending by hand.
+#
+# Defaults that are already off, so they need no line here, with the reasons
+# worth keeping (each was established the hard way):
+#
+#   MMC / DM_MMC / MMC_DW / MMC_DW_ROCKCHIP — the BootROM reads the card and
+#     streams stage 2 into DRAM itself, so U-Boot needs no storage driver until
+#     there is a kernel to load. Note initr_mmc (board_r.c:748) runs BEFORE
+#     console_init_r (:780), so a dwmmc probe hanging in the CRU clock lookup
+#     makes the USB ACM console unreachable. DM_MMC cannot be negated from a
+#     defconfig anyway: non-prompted bool, selected by MMC, MMC is `default ARM`.
+#     Turning MMC itself off is worth -12,296 B of u-boot.bin (measured).
+#   CMD_FAT / CMD_EXT4 / CMD_FS_GENERIC / CMD_MMC / CMD_USB / CMD_GPT / CMD_I2C —
+#     nothing here runs before the prompt and the boot does not reach one. Re-add
+#     CMD_FAT ALONE once there is a zImage to load; EXT4 does not come with it.
+#   USB_DWC2 (host) — dwc2.c skips a node only for dr_mode == "peripheral", and
+#     ours says "otg", so the host driver would bind usb@10180000 and reset the
+#     very core the ACM gadget needs (docs/re/USBPLUG-RE.md).
+#   ROCKCHIP_GPIO — no DM GPIO consumer exists yet; the LED probe writes GPIO2
+#     directly and the sdmmc node has no cd-gpios.
+#   SARADC_ROCKCHIP — not inert if enabled: setup_boot_mode() ->
+#     rockchip_dnl_key_pressed() (mach-rockchip/boot_mode.c:40) walks UCLASS_ADC
+#     and probes the SARADC inside board_late_init, in the window where the boot
+#     currently dies. Page-turn ladder keys are a kernel concern.
+#   SYS_I2C_ROCKCHIP / DM_PMIC / PMIC_ACT8865 / REGULATOR_ACT8865 — nothing
+#     consults them before the failure: board_init is empty, no power_init_board
+#     is defined, and the sdmmc node has no vmmc-supply. VCC_SD (LDO3) is left as
+#     the vendor path left it. Restore when the panel or charger needs a rail.
+#   NET_LEGACY / NETDEVICES — no Ethernet exists on this board at all.
+#   SYS_ARCH_TIMER — Cortex-A9, no architected timer to enable.
+# ---------------------------------------------------------------------------
 
 CONFIG_ARM=y
 CONFIG_SKIP_LOWLEVEL_INIT=y
 CONFIG_SPL_SKIP_LOWLEVEL_INIT=y
-# CONFIG_SYS_ARCH_TIMER is not set
+# CONFIG_SPL_USE_ARCH_MEMCPY is not set
+# CONFIG_SPL_USE_ARCH_MEMSET is not set
 CONFIG_ARCH_ROCKCHIP=y
 CONFIG_TEXT_BASE=0x60000000
+CONFIG_SPL_LIBGENERIC_SUPPORT=y
 CONFIG_NR_DRAM_BANKS=1
 CONFIG_HAS_CUSTOM_SYS_INIT_SP_ADDR=y
 CONFIG_CUSTOM_SYS_INIT_SP_ADDR=0x60100000
@@ -30,170 +73,91 @@ CONFIG_SPL_STACK=0x10081fff
 # ("b 1f"). The BROM then branches to a fixed 0x10080804. Linking at 0x...804
 # instead skews every absolute word by 4 and fails silently. (BROM disassembly.)
 CONFIG_SPL_TEXT_BASE=0x10080800
-# Minimal SPL, modeled on rk3036: a tiny board_init_f that inits the debug
-# UART + timer, brings up DRAM, and returns to the mask ROM (back-to-BROM).
-# The BROM never touches the DDR controller and leaves the PLLs bypassed at
-# 24MHz, so sdram_init() here is what trains DRAM — hence SPL_STACK must stay
-# in SRAM.  No framework / malloc / block layer is pulled in, which keeps the
-# SPL small enough for internal SRAM.
-# CONFIG_SPL_FRAMEWORK is not set
-# Back-to-BROM: the mask ROM (not the SPL) loads U-Boot proper, so the SPL
-# needs no MMC stack of its own — it inits UART+timer, trains DRAM, returns.
-#
-# MEASURED 2026-07-29, and it contradicts what this file used to claim: the two
-# negations below DO NOT TAKE. The built .config has CONFIG_SPL_DM=y and
-# CONFIG_SPL_BLK=y, and the SPL links uclass.c and blk-uclass.c. The SPL is not
-# DM-free; it is DM-INERT, because SPL_FRAMEWORK=n and nothing calls spl_init().
-# Six negations in this file are inert the same way: SPL_DM, SPL_BLK, DM_MMC,
-# CMD_FAT, CMD_EXT4, CMD_FS_GENERIC. DM_MMC in particular cannot be negated from
-# a defconfig at all — it is a non-prompted bool that MMC selects, and MMC is
-# `default ARM`. Turning MMC itself off does work: -12,296 B of u-boot.bin.
-#
-# Consequence for the SPL timebase: SPL_TIMER's deps (TIMER && SPL && SPL_DM)
-# are already satisfied. Enabling it links, at +368 B (3872 -> 4240 of a 6144 B
-# window). It is NOT a size problem. What blocks a working SPL DM timer is
-# SPL_OF_CONTROL: it pulls drivers/core/device.c's calloc, which is not linked
-# into this SPL, and neither SPL_SYS_MALLOC_SIMPLE nor SPL_SYS_MALLOC resolved
-# it. Without a DT in the SPL, SPL_TIMER links but binds nothing.
-# CONFIG_SPL_MMC is not set
-# CONFIG_SPL_BLK is not set
-# CONFIG_SPL_DM is not set
-# Keep the back-to-BROM SPL tiny: no partition/blk code (those pull part_init /
-# blk-uclass and the full DM malloc into SPL).  Mirrors evb-rk3036.
-# CONFIG_SPL_PARTITIONS is not set
-# CONFIG_SPL_DOS_PARTITION is not set
-# CONFIG_SPL_EFI_PARTITION is not set
-# CONFIG_SPL_USE_ARCH_MEMCPY is not set
-# CONFIG_SPL_USE_ARCH_MEMSET is not set
-CONFIG_SPL_LIBGENERIC_SUPPORT=y
-CONFIG_SPL_SERIAL=y
 CONFIG_SPL_STACK_R=y
 CONFIG_SYS_LOAD_ADDR=0x60800800
-CONFIG_DEBUG_UART=y
+CONFIG_PRE_CON_BUF_ADDR=0x60f00000
+CONFIG_PRE_CON_BUF_SZ=8192
 CONFIG_DEBUG_UART_BASE=0x20068000
+# 24 MHz, and it is not a guess: CLKSEL_CON15 bits[9:8] = 2 selects xin24m
+# directly, and the vendor console runs with both uart2 dividers gated
+# (docs/HARDWARE-CONSTANTS.md). The IP is a DW_apb_uart v3.08a.
 CONFIG_DEBUG_UART_CLOCK=24000000
-CONFIG_DEBUG_UART_SHIFT=2
-CONFIG_DEBUG_UART_ANNOUNCE=y
-# The raw debug-UART driver does no pinmux: board_debug_uart_init() in
-# mach-rockchip/rk3026/rk3026.c muxes GPIO2_C6/C7 to UART2 (FUNC3) first.
-CONFIG_DEBUG_UART_BOARD_INIT=y
-CONFIG_SYS_NS16550_MEM32=y
-CONFIG_CONSOLE_MUX=y
+CONFIG_DEBUG_UART=y
+# UEFI is an upstream default for armv7 (lib/efi_loader/Kconfig: "default y if
+# ... SYS_CPU = armv7"), not something this board asked for. We boot a zImage via
+# extlinux/distroboot, never an EFI binary. It also pulls in LMB, DM_EVENT,
+# EVENT_DYNAMIC, LIB_UUID and CHARSET, and adds efi_init_early +
+# efi_memory_init to board_init_r.
+# CONFIG_EFI_LOADER is not set
 CONFIG_DEFAULT_FDT_FILE="rk3026-onyx-c67ml-magellan.dtb"
+# PRE_CONSOLE_BUFFER matters as much as the ACM gadget itself: USB cannot
+# enumerate until late in board_init_r, so without it every message from before
+# that point is lost -- which is exactly the part worth reading.
+CONFIG_PRE_CONSOLE_BUFFER=y
+CONFIG_CONSOLE_MUX=y
 # CONFIG_DISPLAY_CPUINFO is not set
 # CONFIG_DISPLAY_BOARDINFO is not set
-# CONFIG_DISPLAY_BOARDINFO_LATE is not set
-# CONFIG_SPL_FRAMEWORK is not set
-CONFIG_SPL_NO_BSS_LIMIT=y
-CONFIG_SPL_HAVE_INIT_STACK=y
-# Staged LED progress signal (no serial console yet): blink count = milestone,
-# emitted from board_early_init_f / dram_init / misc_init_r, plus an
-# EVT_LAST_STAGE_INIT spy (board_late_init is taken by mach-rockchip/board.c).
+# Staged LED progress signal (no serial console yet), emitted from
+# board_early_init_f / dram_init / misc_init_r, plus an EVT_LAST_STAGE_INIT spy
+# (board_late_init is taken by mach-rockchip/board.c).
 CONFIG_BOARD_EARLY_INIT_F=y
 CONFIG_LAST_STAGE_INIT=y
 CONFIG_MISC_INIT_R=y
-# USB HOST stack off; the GADGET below stays. Not merely unused: dwc2.c skips a
-# node only for dr_mode == "peripheral", ours says "otg", so the host driver
-# binds usb@10180000 and resets/programs the very core the ACM gadget needs
-# (docs/re/USBPLUG-RE.md). There is nothing to host on this board -- WiFi is a
-# kernel concern, and `ums` needs MMC, which is off too. Restore with MMC.
+# Back-to-BROM SPL: the mask ROM (not the SPL) loads U-Boot proper, so the SPL
+# only inits UART+timer, trains DRAM, and returns. It never calls spl_init().
+#
+# The SPL is therefore DM-INERT, not DM-free -- CONFIG_SPL_DM is =y regardless of
+# what any defconfig line says. MEASURED 2026-07-29, in case anyone reasons about
+# this again instead of building it:
+#
+#   baseline SPL                                              3872 B
+#   + SPL_TIMER + SPL_SYS_MALLOC_SIMPLE                       4240 B  (links)
+#   + SPL_FRAMEWORK + SPL_SYS_MALLOC_F + SPL_LIBCOMMON_SUPPORT
+#     + SPL_OF_CONTROL + SPL_TIMER + SPL_DM_SERIAL           13532 B
+#
+# against a 6144 B SRAM window. So a real DT+DM SPL is not blocked by a missing
+# symbol -- it links, with DM and fdtdec genuinely in the binary -- it is blocked
+# by being 2.2x too big. Next thing to measure is SPL_OF_PLATDATA, which drops
+# fdtdec and the embedded DT. The link prerequisites, if you retry it:
+# SPL_SYS_MALLOC_F depends on SPL_FRAMEWORK; malloc_simple.o (which has calloc)
+# lives in common/ and needs SPL_LIBCOMMON_SUPPORT; the legacy serial core needs
+# default_serial_console unless SPL_DM_SERIAL is on.
+# CONFIG_SPL_FRAMEWORK is not set
+CONFIG_SPL_NO_BSS_LIMIT=y
+CONFIG_SPL_HAVE_INIT_STACK=y
+# CONFIG_SPL_DOS_PARTITION is not set
+# CONFIG_SPL_EFI_PARTITION is not set
+# No Ethernet exists on this board -- not a port, not a PHY, not a USB NIC in the
+# boot path -- yet NET is an upstream default, and initr_net runs inside
+# board_init_r (board_r.c:823), in the window where the boot currently dies.
+# CONFIG_NET is not set
+CONFIG_SYSCON=y
+# See the ADC note in the header block: enabling this probes the SARADC from
+# board_late_init, inside the failing window.
+# CONFIG_ADC is not set
+CONFIG_CLK=y
+# CONFIG_DM_I2C is not set
+CONFIG_PINCTRL=y
+# CONFIG_DM_REGULATOR is not set
+# CONFIG_SPL_DM_SERIAL is not set
+CONFIG_DEBUG_UART_SHIFT=2
+CONFIG_DEBUG_UART_ANNOUNCE=y
+CONFIG_SYS_NS16550_MEM32=y
+CONFIG_SYSRESET=y
+# CONFIG_SPL_SYSRESET is not set
+CONFIG_TIMER=y
+CONFIG_ROCKCHIP_TIMER=y
+# USB CDC-ACM console. The OTG controller (usb@10180000, dwc2) is the only
+# bidirectional channel this board has without soldering to the UART leads.
 #
 # CONFIG_USB itself must stay: the whole gadget menu, ACM console included, is
 # inside `if USB` (drivers/usb/Kconfig:35..188). Turning it off silently took the
 # console with it. DM_USB likewise -- USB_GADGET selects it.
 CONFIG_USB=y
-# CONFIG_USB_DWC2 is not set
-# CONFIG_USB_STORAGE is not set
-# CONFIG_CMD_USB is not set
-# CONFIG_CMD_USB_MASS_STORAGE is not set
-# Command tables and filesystem libraries: nothing here runs before the prompt,
-# and the boot does not reach a prompt yet. Re-add CONFIG_CMD_FAT ALONE once
-# there is a kernel to load -- U-Boot stays FAT-only and reads the zImage from a
-# FAT partition. EXT4 does not come back with it.
-# CONFIG_CMD_GPT is not set
-# CONFIG_CMD_I2C is not set
-# CONFIG_CMD_MMC is not set
-# CONFIG_CMD_FAT is not set
-# CONFIG_CMD_EXT4 is not set
-# CONFIG_CMD_FS_GENERIC is not set
-# CONFIG_CMD_CACHE is not set
-CONFIG_OF_CONTROL=y
-CONFIG_ENV_IS_NOWHERE=y
-CONFIG_SYSCON=y
-CONFIG_REGMAP=y
-CONFIG_CLK=y
-# Cortex-A9 has no arch timer: use the Rockchip DM timer in U-Boot proper.
-# No Ethernet exists on this board -- not a port, not a PHY, not a USB NIC in
-# the boot path -- yet CONFIG_NET/NETDEVICES are upstream defaults, and
-# initr_net runs inside board_init_r (board_r.c:823), in the window where the
-# boot currently dies.
-# CONFIG_NET is not set
-# CONFIG_NET_LEGACY is not set
-# CONFIG_NETDEVICES is not set
-# ADC and the Rockchip SARADC are upstream defaults, not something this board
-# asked for, and they are NOT inert: setup_boot_mode() -> rockchip_dnl_key_pressed()
-# (arch/arm/mach-rockchip/boot_mode.c:40) walks UCLASS_ADC and single-shots
-# channel 1 on "saradc", which probes the SARADC and asks the CRU for its
-# clocks -- inside board_late_init, i.e. exactly the window where the boot dies.
-# The page-turn ADC ladder keys are a kernel concern; U-Boot needs none of it.
-# CONFIG_ADC is not set
-# CONFIG_SARADC_ROCKCHIP is not set
-CONFIG_SYS_TIMER_COUNTS_DOWN=y
-CONFIG_TIMER=y
-CONFIG_ROCKCHIP_TIMER=y
-# No DM GPIO consumer exists: the LED probe writes GPIO2's registers directly
-# (board/rockchip/boox-c67ml/boox-c67ml.c), the sdmmc node has no cd-gpios, and
-# pinctrl handles the pad muxing. Restore it when a driver wants a gpio phandle.
-# CONFIG_ROCKCHIP_GPIO is not set
-CONFIG_PINCTRL=y
-# No MMC in U-Boot for now. The BootROM reads the card and streams stage 2 into
-# DRAM itself, so U-Boot needs no storage driver until there is a kernel to
-# load -- and initr_mmc (board_r.c:748) runs BEFORE console_init_r (:780), so
-# the dwmmc probe hanging in the CRU clock lookup makes the USB ACM console
-# unreachable. Restore this group, with CONFIG_CMD_FAT, when loading a zImage.
-# CONFIG_DM_MMC is not set
-# CONFIG_MMC_DW is not set
-# CONFIG_MMC_DW_ROCKCHIP is not set
-# CONFIG_SPL_DM_SERIAL is not set
-# I2C, the ACT8931 PMIC and its regulators. Nothing consults them before the
-# failure: board_init is empty here, no board code defines power_init_board, and
-# the sdmmc node has no vmmc-supply, so the SD controller probes without asking
-# for a regulator. VCC_SD (LDO3) is left as the vendor path left it -- U-Boot
-# never drove it. Restore this group when the panel or charger needs a rail.
-# CONFIG_SYS_I2C_ROCKCHIP is not set
-# CONFIG_DM_I2C is not set
-# CONFIG_SPL_DM_I2C is not set
-# CONFIG_DM_PMIC is not set
-# CONFIG_SPL_DM_PMIC is not set
-# CONFIG_PMIC_ACT8865 is not set
-# CONFIG_DM_REGULATOR is not set
-# CONFIG_SPL_DM_REGULATOR is not set
-# CONFIG_REGULATOR_ACT8865 is not set
-CONFIG_SYSRESET=y
-# CONFIG_SPL_SYSRESET is not set
-CONFIG_SPL_TINY_MEMSET=y
-# UEFI is an upstream default for armv7 (lib/efi_loader/Kconfig: "default y if
-# ... SYS_CPU = armv7"), not something this board asked for. We boot a zImage
-# via extlinux/distroboot, never an EFI binary. It also pulls in LMB, DM_EVENT,
-# EVENT_DYNAMIC, LIB_UUID and CHARSET, adds efi_init_early + efi_memory_init to
-# board_init_r, and is part of why u-boot.img grew 844 -> 936 sectors.
-# CONFIG_EFI_LOADER is not set
-# Both are print-only, and there is no console before the failure.
-# CONFIG_ERRNO_STR is not set
-
-# USB CDC-ACM console. The OTG controller (usb@10180000, dwc2) is the only
-# bidirectional channel this board has without soldering to the UART leads.
-# PRE_CONSOLE_BUFFER matters as much as the gadget itself: USB cannot enumerate
-# until late in board_init_r, so without it every message from before that point
-# would be lost -- which is exactly the part worth reading.
 CONFIG_USB_GADGET=y
 CONFIG_USB_GADGET_MANUFACTURER="ONYX"
-CONFIG_USB_GADGET_VENDOR_NUM=0x2207
 CONFIG_USB_GADGET_PRODUCT_NUM=0x0010
 CONFIG_USB_GADGET_DWC2_OTG=y
 CONFIG_USB_FUNCTION_ACM=y
-CONFIG_CONSOLE_MUX=y
-CONFIG_SYS_CONSOLE_IS_IN_ENV=y
-CONFIG_PRE_CONSOLE_BUFFER=y
-CONFIG_PRE_CON_BUF_ADDR=0x60f00000
-CONFIG_PRE_CON_BUF_SZ=8192
+CONFIG_SYS_TIMER_COUNTS_DOWN=y
+CONFIG_SPL_TINY_MEMSET=y
