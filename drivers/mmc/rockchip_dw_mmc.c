@@ -55,7 +55,18 @@ static uint rockchip_dwmmc_get_mmc_clk(struct dwmci_host *host, uint freq)
 		return 0;
 	}
 
-	return freq;
+	/*
+	 * Report what was actually programmed, not what was asked for. On
+	 * rk3026 the CRU divider is 6 bits, so a 400 kHz request off a 132 MHz
+	 * gpll cannot be met by the CRU alone and clk_set_rate clamps. Returning
+	 * `freq` here made dwmci_setup_bus see sclk == freq and select bypass
+	 * (CLKDIV = 0), leaving the card clocked at 1.78 MHz during
+	 * identification -- commands answered, ACMD51 SEND_SCR timed out.
+	 * MEASURED on hardware 2026-07-29. With the real rate returned, dwmci
+	 * divides the remainder down with the controller's own CLKDIV, which is
+	 * also what the BootROM does.
+	 */
+	return ret;
 }
 
 static int rockchip_dwmmc_of_to_plat(struct udevice *dev)

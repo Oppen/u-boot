@@ -301,9 +301,29 @@ static ulong rockchip_mmc_set_clk(struct rk3026_cru *cru, uint gpll_rate,
 
 	debug("%s: gpll_rate=%u, freq=%u\n", __func__, gpll_rate, freq);
 
-	/* mmc clock is divided by 2 inside the DW MMC controller */
+	/*
+	 * mmc clock is divided by 2 inside the DW MMC controller.
+	 *
+	 * The divider field is 6 bits, so src_clk_div - 1 must be <= 63. The
+	 * MMC core asks for 400 kHz during identification, and with gpll at
+	 * 132 MHz that wants DIV_ROUND_UP(66 MHz, 400 kHz) = 165: the old code
+	 * wrote 164 = 0xa4 into the field, assert() being compiled out in a
+	 * release build. MEASURED consequence on hardware 2026-07-29,
+	 * CLKSEL_CON11 read from the U-Boot prompt as 0x000027e4 -- field
+	 * [5:0] = 0xa4 & 0x3f = 36, and 0xa4's bit 7 spilled outside the field.
+	 * The card therefore ran at 132/37/2 = 1.78 MHz during identification
+	 * instead of 400 kHz: every command still answered, and ACMD51
+	 * SEND_SCR -- the first data transfer -- returned -110 every time.
+	 *
+	 * Clamp instead, and return the rate actually programmed so the caller
+	 * can make up the difference with the controller's own CLKDIV. That is
+	 * what the BootROM does: it writes CLKSEL_CON11 once and then uses
+	 * CLKDIV = 30 for identification, CLKDIV = 1 afterwards
+	 * (docs/re/BROM-SD-PATH.md section 5, BINARY tier).
+	 */
 	src_clk_div = DIV_ROUND_UP(gpll_rate / 2, freq);
-	assert(src_clk_div - 1 < 64);
+	if (src_clk_div > 64)
+		src_clk_div = 64;
 
 	switch (periph) {
 	case HCLK_EMMC:
