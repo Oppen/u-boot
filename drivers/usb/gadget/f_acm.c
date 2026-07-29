@@ -23,6 +23,7 @@
 #include <linux/usb/gadget.h>
 #include <linux/usb/composite.h>
 #include <linux/usb/cdc.h>
+#include <boox_probe.h>
 
 #define REQ_SIZE_MAX	512
 
@@ -651,12 +652,23 @@ static int acm_stdio_start(struct stdio_dev *dev)
 	else
 		return -ENODEV;
 
+	/*
+	 * 77 fires only if the gadget got this far: the UDC probed, g_dnl
+	 * registered, and we are now waiting for a host to open the CDC port. It
+	 * separates "the gadget is up and the host cannot see us" from "the
+	 * gadget never started" -- the two have identical symptoms with no
+	 * console, since this loop is silent and every failure above it just
+	 * returns.
+	 */
+	BOOX_STEP_AT_R(77);
+
 	while (!acm_connected(dev)) {
 		if (ctrlc())
 			return -ECANCELED;
 
 		schedule();
 	}
+	BOOX_STEP_AT_R(78);		/* a host opened the port */
 
 	return 0;
 }

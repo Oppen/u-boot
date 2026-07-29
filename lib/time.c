@@ -11,6 +11,7 @@
 #include <init.h>
 #include <spl.h>
 #include <time.h>
+#include <boox_probe.h>
 #include <timer.h>
 #include <watchdog.h>
 #include <div64.h>
@@ -94,7 +95,16 @@ uint64_t notrace get_ticks(void)
 		if (IS_ENABLED(CONFIG_TIMER_EARLY))
 			return timer_early_get_count();
 
+		/*
+		 * 82/83 bracket the lazy DM timer init, which is where
+		 * get_timer() wedges (step 78 = dark forever) even though timer0
+		 * itself counts fine when poked directly (step 81 = long on).
+		 * dm_timer_init() probes the timer udevice, which asks the CRU for
+		 * clocks -- the same lookup the SD probe died in.
+		 */
+		BOOX_STEP_AT_R(82);		/* about to call dm_timer_init() */
 		ret = dm_timer_init();
+		BOOX_STEP_AT_R(83);		/* it RETURNED */
 		if (ret)
 			panic("Could not initialize timer (err %d)\n", ret);
 	}
