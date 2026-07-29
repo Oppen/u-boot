@@ -480,6 +480,19 @@ int uclass_get_device_by_driver(enum uclass_id id,
 	return -ENODEV;
 }
 
+/*
+ * Steps 64/65 bisect the return path out of device_probe(cru), which step 63
+ * reaches ("about to return") while steps 58 and 69 -- three statements later --
+ * stay solid. Gated on the device itself, not boox_scope, so the global is not
+ * part of the claim.
+ */
+#ifdef UBOOT_CURRENT_STEP
+static bool boox_dev_is_cru(struct udevice *dev)
+{
+	return dev && dev->name && strstr(dev->name, "20000000");
+}
+#endif
+
 int uclass_get_device_tail(struct udevice *dev, int ret, struct udevice **devp)
 {
 	if (ret)
@@ -487,10 +500,15 @@ int uclass_get_device_tail(struct udevice *dev, int ret, struct udevice **devp)
 
 	assert(dev);
 	ret = device_probe(dev);
+
+	BOOX_STEP_AT_IF(64, boox_dev_is_cru(dev));	/* CRU: device_probe returned into the tail */
+
 	if (ret)
 		return ret;
 
 	*devp = dev;
+
+	BOOX_STEP_AT_IF(65, boox_dev_is_cru(dev));	/* CRU: tail about to return 0 */
 
 	return 0;
 }
