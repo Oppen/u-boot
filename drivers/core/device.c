@@ -511,9 +511,19 @@ static bool boox_is_sd(struct udevice *dev)
 		if ((n) == UBOOT_CURRENT_STEP && (cond))		\
 			boox_step_blink();				\
 	} while (0)
+/*
+ * A CRU probe reached from the SD controller's clock lookup, and no other. The
+ * CRU is probed by earlier consumers too, and a marker blinks forever, so a
+ * CRU-only gate halts at whichever probe arrives first and says nothing about
+ * the SD's lookup -- which is what made steps 61/63 (blink) and 58/69 (solid)
+ * read as contradictory.
+ */
+#define BOOX_DM_STEP_CRU_SD(n, dev)					\
+	BOOX_DM_STEP2((n), boox_is_cru(dev) && boox_scope)
 #else
 #define BOOX_DM_STEP(n, dev)	do { } while (0)
 #define BOOX_DM_STEP2(n, cond)	do { } while (0)
+#define BOOX_DM_STEP_CRU_SD(n, dev)	do { } while (0)
 #endif
 
 int device_probe(struct udevice *dev)
@@ -631,13 +641,13 @@ int device_probe(struct udevice *dev)
 			goto fail;
 	}
 
-	BOOX_DM_STEP2(61, boox_is_cru(dev));	/* CRU: drv->probe returned */
+	BOOX_DM_STEP_CRU_SD(61, dev);	/* CRU via SD lookup: drv->probe returned */
 
 	ret = uclass_post_probe_device(dev);
 	if (ret)
 		goto fail_uclass;
 
-	BOOX_DM_STEP2(62, boox_is_cru(dev));	/* CRU: uclass_post_probe done */
+	BOOX_DM_STEP_CRU_SD(62, dev);	/* CRU via SD lookup: uclass_post_probe done */
 
 	if (dev->parent && device_get_uclass_id(dev) == UCLASS_PINCTRL) {
 		ret = pinctrl_select_state(dev, "default");
@@ -650,7 +660,7 @@ int device_probe(struct udevice *dev)
 	if (ret)
 		goto fail_event;
 
-	BOOX_DM_STEP2(63, boox_is_cru(dev));	/* CRU: device_probe about to return */
+	BOOX_DM_STEP_CRU_SD(63, dev);	/* CRU via SD lookup: device_probe about to return */
 
 	return 0;
 fail_event:
