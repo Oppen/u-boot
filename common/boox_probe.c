@@ -26,9 +26,17 @@
  */
 #define SPIN		200000
 
+/*
+ * Post-relocation sites run with caches on, where SPIN above is nearly
+ * invisible -- common/board_r.c hit exactly that and kept a 5,000,000 spin of
+ * its own. Same probe, slower, so cached code can use the shared function
+ * instead of copying it.
+ */
+#define SPIN_CACHED	5000000
+
 int boox_scope;
 
-noinline void boox_step_blink(void)
+static noinline void boox_blink(u32 spin)
 {
 	volatile u32 i;
 
@@ -37,10 +45,20 @@ noinline void boox_step_blink(void)
 
 	while (1) {
 		setbits_le32((void __iomem *)(GPIO2_BASE + GPIO_DR), LED_BIT);
-		for (i = 0; i < SPIN; i++)
+		for (i = 0; i < spin; i++)
 			;
 		clrbits_le32((void __iomem *)(GPIO2_BASE + GPIO_DR), LED_BIT);
-		for (i = 0; i < SPIN; i++)
+		for (i = 0; i < spin; i++)
 			;
 	}
+}
+
+noinline void boox_step_blink(void)
+{
+	boox_blink(SPIN);
+}
+
+noinline void boox_step_blink_r(void)
+{
+	boox_blink(SPIN_CACHED);
 }

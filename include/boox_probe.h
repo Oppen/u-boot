@@ -13,6 +13,9 @@
 
 #ifdef UBOOT_CURRENT_STEP
 void boox_step_blink(void);
+/* Same probe with a much longer spin, for post-relocation code running with
+ * caches on, where the short spin is too fast to read as a blink. */
+void boox_step_blink_r(void);
 /*
  * Caller scope. Deep shared code (uclass, device core) cannot tell which
  * consumer it is running for, so the caller sets this around the call it cares
@@ -25,9 +28,12 @@ extern int boox_scope;
  * otherwise a shared code path blinks for whichever consumer reaches it first
  * and the reading says nothing about the device under investigation. */
 #define BOOX_STEP_AT_IF(n, cond)	do { if ((n) == UBOOT_CURRENT_STEP && (cond)) boox_step_blink(); } while (0)
+/* Cached-code variant; see boox_step_blink_r(). */
+#define BOOX_STEP_AT_R(n)	do { if ((n) == UBOOT_CURRENT_STEP) boox_step_blink_r(); } while (0)
 #else
 #define BOOX_STEP_AT(n)		do { } while (0)
 #define BOOX_STEP_AT_IF(n, cond)	do { } while (0)
+#define BOOX_STEP_AT_R(n)	do { } while (0)
 #endif
 
 #endif
