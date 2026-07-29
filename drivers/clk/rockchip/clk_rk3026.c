@@ -133,10 +133,14 @@ static void rkclk_init(struct rk3026_cru *cru)
 	 * core hz : apll = 1:1
 	 */
 	aclk_div = APLL_HZ / CORE_ACLK_HZ - 1;
-	assert((aclk_div + 1) * CORE_ACLK_HZ == APLL_HZ && aclk_div < 0x7);
+	_Static_assert(APLL_HZ % CORE_ACLK_HZ == 0 &&
+		       APLL_HZ / CORE_ACLK_HZ - 1 < 0x7,
+		       "core aclk: APLL/CORE_ACLK not exact, or divider > 3 bits");
 
 	pclk_div = APLL_HZ / CORE_PERI_HZ - 1;
-	assert((pclk_div + 1) * CORE_PERI_HZ == APLL_HZ && pclk_div < 0xf);
+	_Static_assert(APLL_HZ % CORE_PERI_HZ == 0 &&
+		       APLL_HZ / CORE_PERI_HZ - 1 < 0xf,
+		       "core peri: APLL/CORE_PERI not exact, or divider > 4 bits");
 
 	rk_clrsetreg(&cru->cru_clksel_con[0],
 		     CORE_CLK_PLL_SEL_MASK | CORE_DIV_CON_MASK,
@@ -158,13 +162,19 @@ static void rkclk_init(struct rk3026_cru *cru)
 	 * hclk/pclk came out 4x and 8x low.
 	 */
 	aclk_div = APLL_HZ / BUS_ACLK_HZ - 1;
-	assert((aclk_div + 1) * BUS_ACLK_HZ == APLL_HZ && aclk_div <= 0x1f);
+	_Static_assert(APLL_HZ % BUS_ACLK_HZ == 0 &&
+		       APLL_HZ / BUS_ACLK_HZ - 1 <= 0x1f,
+		       "bus aclk: APLL/BUS_ACLK not exact, or divider > 5 bits");
 
 	pclk_div = BUS_ACLK_HZ / BUS_PCLK_HZ - 1;
-	assert((pclk_div + 1) * BUS_PCLK_HZ == BUS_ACLK_HZ && pclk_div <= 0x7);
+	_Static_assert(BUS_ACLK_HZ % BUS_PCLK_HZ == 0 &&
+		       BUS_ACLK_HZ / BUS_PCLK_HZ - 1 <= 0x7,
+		       "bus pclk: divides BUS_ACLK, not exact, or divider > 3 bits");
 
 	hclk_div = BUS_ACLK_HZ / BUS_HCLK_HZ - 1;
-	assert((hclk_div + 1) * BUS_HCLK_HZ == BUS_ACLK_HZ && hclk_div <= 0x3);
+	_Static_assert(BUS_ACLK_HZ % BUS_HCLK_HZ == 0 &&
+		       BUS_ACLK_HZ / BUS_HCLK_HZ - 1 <= 0x3,
+		       "bus hclk: divides BUS_ACLK, not exact, or divider > 2 bits");
 
 	rk_clrsetreg(&cru->cru_clksel_con[0],
 		     BUS_ACLK_PLL_SEL_MASK | BUS_ACLK_DIV_MASK,
@@ -181,15 +191,21 @@ static void rkclk_init(struct rk3026_cru *cru)
 	 * set up dependent divisors for PCLK/HCLK and ACLK clocks.
 	 */
 	aclk_div = GPLL_HZ / PERI_ACLK_HZ - 1;
-	assert((aclk_div + 1) * PERI_ACLK_HZ == GPLL_HZ && aclk_div < 0x1f);
+	_Static_assert(GPLL_HZ % PERI_ACLK_HZ == 0 &&
+		       GPLL_HZ / PERI_ACLK_HZ - 1 < 0x1f,
+		       "peri aclk: GPLL/PERI_ACLK not exact, or divider > 5 bits");
 
 	hclk_div = ilog2(PERI_ACLK_HZ / PERI_HCLK_HZ);
-	assert((1 << hclk_div) * PERI_HCLK_HZ ==
-		PERI_ACLK_HZ && (hclk_div < 0x4));
+	_Static_assert((1 << ilog2(PERI_ACLK_HZ / PERI_HCLK_HZ)) * PERI_HCLK_HZ ==
+		       PERI_ACLK_HZ &&
+		       ilog2(PERI_ACLK_HZ / PERI_HCLK_HZ) < 0x4,
+		       "peri hclk: shift not exact, or shift > 2 bits");
 
 	pclk_div = ilog2(PERI_ACLK_HZ / PERI_PCLK_HZ);
-	assert((1 << pclk_div) * PERI_PCLK_HZ ==
-		PERI_ACLK_HZ && pclk_div < 0x8);
+	_Static_assert((1 << ilog2(PERI_ACLK_HZ / PERI_PCLK_HZ)) * PERI_PCLK_HZ ==
+		       PERI_ACLK_HZ &&
+		       ilog2(PERI_ACLK_HZ / PERI_PCLK_HZ) < 0x8,
+		       "peri pclk: shift not exact, or shift > 3 bits");
 
 	rk_clrsetreg(&cru->cru_clksel_con[10],
 		     PERI_PLL_SEL_MASK | PERI_PCLK_DIV_MASK |
