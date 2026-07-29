@@ -185,3 +185,13 @@ CONFIG_CMD_MMC=y
 # and hid this. There is no kernel on the card yet, so autoboot has nothing to do
 # that is worth losing the prompt over; type `bootflow scan` when it is wanted.
 CONFIG_BOOTDELAY=-1
+# MMC command tracing. Diagnostic only, and it is here because U-Boot hides the
+# one thing we need: `mmc dev 0` returns SILENTLY on failure --
+# __init_mmc_device() (cmd/mmc.c) does `if (mmc_init(mmc)) return NULL;` with no
+# print, and do_mmc_dev then returns CMD_RET_FAILURE printing nothing either. So
+# on 2026-07-29 `mmc list` showed mmc@10214000:0, `mmc dev 0` printed NOTHING, and
+# `fatls mmc 0:1` said "Bad device specification" -- i.e. the controller binds and
+# mmc_init() fails invisibly. MMC_TRACE logs every CMD and response, which says
+# whether the card answers CMD0/CMD8/ACMD41 at all.
+# Remove once the card initialises; it is noisy per command.
+CONFIG_MMC_TRACE=y
