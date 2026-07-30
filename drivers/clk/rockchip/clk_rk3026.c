@@ -417,9 +417,146 @@ static ulong rk3026_clk_set_rate(struct clk *clk, ulong rate)
 	return new_rate;
 }
 
+/*
+ * Clock gates.
+ *
+ * Every (reg, bit) below is attributed in docs/re/CRU-GATES.md §6.2, which maps
+ * 100 of the 160 (register, bit) slots from the running vendor kernel's own clock
+ * table [blob] and cross-checks them against a live CLKGATE_CON snapshot [device].
+ * Nothing here is guessed: an id whose gate is not attributed is simply absent
+ * from the table.
+ *
+ * Two rules that are not obvious and both cost real time to establish:
+ *
+ *  - cru_clkgate_con[] is declared with 11 entries (cru_rk3026.h) but the hardware
+ *    has only 10 registers, CON0..CON9. Writing index 10 pokes whatever follows.
+ *    rk3026_gate_set() refuses it rather than trusting the table.
+ *
+ *  - Several leaves sit behind a bus gate, so entries list their parents FIRST and
+ *    enable walks the list in order (the parent-before-child rule from
+ *    clk_enable_nolock, CRU-GATES §1). disable() touches only the leaf: parents are
+ *    shared, and gating one because a single child went away would take out its
+ *    siblings.
+ */
+#define RK3026_NR_CLKGATE_CON	10
+
+struct rk3026_gate_bit {
+	u8	reg;
+	u8	bit;
+};
+
+struct rk3026_gate {
+	u16			id;
+	u8			n;
+	struct rk3026_gate_bit	bits[2];	/* parent first, leaf last */
+};
+
+static const struct rk3026_gate rk3026_gates[] = {
+	/* bus roots */
+	{ ACLK_PERI,	1, { { 2, 1 } } },
+	{ HCLK_PERI,	1, { { 2, 2 } } },
+	{ PCLK_PERI,	1, { { 2, 3 } } },
+
+	/* USB OTG device mode: hclk_usb_peri (CON9 b13) gates hclk_otg0 */
+	{ HCLK_OTG,	2, { { 9, 13 }, { 5, 13 } } },
+
+	/* SD/MMC */
+	{ SCLK_SDMMC,	1, { { 2, 11 } } },
+	{ HCLK_SDMMC,	1, { { 5, 10 } } },
+
+	/* SARADC -- the source clock's parent is xin24m, not a bus clock */
+	{ SCLK_SARADC,	1, { { 2, 8 } } },
+	{ PCLK_SARADC,	1, { { 7, 14 } } },
+
+	/* console */
+	{ PCLK_UART2,	1, { { 8, 2 } } },
+	{ SCLK_UART2,	1, { { 1, 12 } } },
+
+	/* timers: APB access only. The 24 MHz SOURCE clocks (CON1 b0/b1) have no
+	 * id in dt-bindings/clock/rk3026-cru.h, so they cannot be requested. */
+	{ PCLK_TIMER0,	1, { { 7, 7 } } },
+	{ PCLK_TIMER1,	1, { { 7, 8 } } },
+
+	{ PCLK_GPIO0,	1, { { 8, 9 } } },
+	{ PCLK_GPIO1,	1, { { 8, 10 } } },
+	{ PCLK_GPIO2,	1, { { 8, 11 } } },
+	{ PCLK_GPIO3,	1, { { 8, 12 } } },
+
+	{ PCLK_I2C0,	1, { { 8, 4 } } },
+	{ PCLK_I2C1,	1, { { 8, 5 } } },
+	{ PCLK_I2C2,	1, { { 8, 6 } } },
+	{ PCLK_I2C3,	1, { { 8, 7 } } },
+
+	{ HCLK_NANDC,	1, { { 5, 9 } } },
+
+	/* pclk_grf's parent is pclk_cpu_pre (CON0 b5), not pclk_periph */
+	{ PCLK_GRF,	1, { { 5, 4 } } },
+};
+
+/* 1 = gated. Hiword mask: [31:16] write-enable, [15:0] value. */
+static void rk3026_gate_set(struct rk3026_cru *cru, u8 reg, u8 bit, bool on)
+{
+	if (reg >= RK3026_NR_CLKGATE_CON) {
+		log_err("rk3026 clk: CLKGATE_CON(%u) does not exist\n", reg);
+		return;
+	}
+
+	writel(on ? BIT(bit + 16) : (BIT(bit) | BIT(bit + 16)),
+	       &cru->cru_clkgate_con[reg]);
+}
+
+static const struct rk3026_gate *rk3026_gate_find(ulong id)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(rk3026_gates); i++)
+		if (rk3026_gates[i].id == id)
+			return &rk3026_gates[i];
+
+	return NULL;
+}
+
+/*
+ * An id with no attributed gate returns 0 rather than -ENOENT on purpose: callers
+ * that treat clk_enable() as fatal would otherwise fail a probe over a clock this
+ * driver simply does not model yet, which is a regression against the current
+ * behaviour where clk_enable() is a no-op for everything.
+ */
+static int rk3026_clk_enable(struct clk *clk)
+{
+	struct rk3026_clk_priv *priv = dev_get_priv(clk->dev);
+	const struct rk3026_gate *g = rk3026_gate_find(clk->id);
+	int i;
+
+	if (!g)
+		return 0;
+
+	for (i = 0; i < g->n; i++)
+		rk3026_gate_set(priv->cru, g->bits[i].reg, g->bits[i].bit, true);
+
+	return 0;
+}
+
+static int rk3026_clk_disable(struct clk *clk)
+{
+	struct rk3026_clk_priv *priv = dev_get_priv(clk->dev);
+	const struct rk3026_gate *g = rk3026_gate_find(clk->id);
+
+	if (!g)
+		return 0;
+
+	/* leaf only -- see the comment above the table */
+	rk3026_gate_set(priv->cru, g->bits[g->n - 1].reg,
+			g->bits[g->n - 1].bit, false);
+
+	return 0;
+}
+
 static struct clk_ops rk3026_clk_ops = {
 	.get_rate	= rk3026_clk_get_rate,
 	.set_rate	= rk3026_clk_set_rate,
+	.enable		= rk3026_clk_enable,
+	.disable	= rk3026_clk_disable,
 };
 
 static int rk3026_clk_of_to_plat(struct udevice *dev)
