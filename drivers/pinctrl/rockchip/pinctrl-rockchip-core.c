@@ -520,9 +520,113 @@ static int rockchip_pinctrl_set_state(struct udevice *dev,
 	return 0;
 }
 
+static struct rockchip_pin_bank *rockchip_pin_to_bank(struct rockchip_pin_ctrl *ctrl,
+						      unsigned int selector,
+						      int *pin_num)
+{
+	struct rockchip_pin_bank *bank = ctrl->pin_banks;
+	int i;
+
+	for (i = 0; i < ctrl->nr_banks; i++, bank++) {
+		if (selector < bank->pin_base + bank->nr_pins) {
+			*pin_num = selector - bank->pin_base;
+			return bank;
+		}
+	}
+
+	return NULL;
+}
+
+static int rockchip_pinctrl_get_pins_count(struct udevice *dev)
+{
+	struct rockchip_pinctrl_priv *priv = dev_get_priv(dev);
+	struct rockchip_pin_ctrl *ctrl = priv->ctrl;
+	struct rockchip_pin_bank *bank = ctrl->pin_banks;
+	int i, count = 0;
+
+	for (i = 0; i < ctrl->nr_banks; i++, bank++)
+		count += bank->nr_pins;
+
+	return count;
+}
+
+static const char *rockchip_pinctrl_get_pin_name(struct udevice *dev,
+						 unsigned int selector)
+{
+	static char name[PINNAME_SIZE];
+	struct rockchip_pinctrl_priv *priv = dev_get_priv(dev);
+	struct rockchip_pin_bank *bank;
+	int pin;
+
+	bank = rockchip_pin_to_bank(priv->ctrl, selector, &pin);
+	if (!bank)
+		return "unknown";
+
+	snprintf(name, sizeof(name), "%s-%d", bank->name, pin);
+
+	return name;
+}
+
+static int rockchip_pinctrl_get_pin_muxing(struct udevice *dev,
+					   unsigned int selector,
+					   char *buf, int size)
+{
+	struct rockchip_pinctrl_priv *priv = dev_get_priv(dev);
+	struct rockchip_pin_ctrl *ctrl = priv->ctrl;
+	struct rockchip_pin_bank *bank;
+	struct regmap *regmap;
+	int pin, reg, mask, mux_type, ret, len;
+	u8 bit;
+	u32 val;
+
+	bank = rockchip_pin_to_bank(ctrl, selector, &pin);
+	if (!bank)
+		return -EINVAL;
+
+	mux_type = bank->iomux[pin / 8].type;
+	regmap = (mux_type & (IOMUX_SOURCE_PMU | IOMUX_L_SOURCE_PMU)) ?
+			priv->regmap_pmu : priv->regmap_base;
+
+	reg = bank->iomux[pin / 8].offset;
+	reg += rockchip_get_mux_data(mux_type, pin, &bit, &mask);
+
+	if (bank->recalced_mask & BIT(pin))
+		rockchip_get_recalced_mux(bank, pin, &reg, &bit, &mask);
+
+	ret = regmap_read(regmap, reg, &val);
+	if (ret)
+		return ret;
+
+	val = (val >> bit) & mask;
+
+	/*
+	 * Report the bank-group-pin name the datasheets and the DT use
+	 * (gpio1-17 is GPIO1_C1), the raw register the mux was read from, and
+	 * the function number -- func 0 is GPIO on every Rockchip SoC.
+	 */
+	len = snprintf(buf, size, "GPIO%d_%c%d 0x%03x[%d] %s",
+		       bank->bank_num, 'A' + (pin / 8), pin % 8,
+		       reg, bit, val ? "func" : "gpio");
+	if (val)
+		len += snprintf(buf + len, size - len, " %d", val);
+
+	if (ctrl->get_pull) {
+		ret = ctrl->get_pull(bank, pin);
+		if (ret >= 0)
+			snprintf(buf + len, size - len, " %s",
+				 ret == PIN_CONFIG_BIAS_DISABLE ?
+					"bias-disable" : "bias-pull-pin-default");
+	}
+
+	return 0;
+}
+
 const struct pinctrl_ops rockchip_pinctrl_ops = {
 	.set_state			= rockchip_pinctrl_set_state,
 	.get_gpio_mux			= rockchip_pinctrl_get_gpio_mux,
+	.get_pins_count			= rockchip_pinctrl_get_pins_count,
+	.get_pin_name			= rockchip_pinctrl_get_pin_name,
+	.get_pin_muxing			= rockchip_pinctrl_get_pin_muxing,
 };
 
 /* retrieve the soc specific data */

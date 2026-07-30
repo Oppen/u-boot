@@ -516,6 +516,11 @@ struct rockchip_pin_ctrl {
 			   int pin, int mux);
 	int	(*set_pull)(struct rockchip_pin_bank *bank,
 			    int pin_num, int pull);
+	/*
+	 * Optional. Reports the current bias as a PIN_CONFIG_BIAS_* value so
+	 * `pinmux status` can show it; only the mux is shown without it.
+	 */
+	int	(*get_pull)(struct rockchip_pin_bank *bank, int pin_num);
 	int	(*set_drive)(struct rockchip_pin_bank *bank,
 			     int pin_num, int strength);
 	int	(*set_schmitt)(struct rockchip_pin_bank *bank,

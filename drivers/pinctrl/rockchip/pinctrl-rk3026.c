@@ -86,6 +86,23 @@ static int rk3026_set_pull(struct rockchip_pin_bank *bank,
 	return ret;
 }
 
+static int rk3026_get_pull(struct rockchip_pin_bank *bank, int pin_num)
+{
+	struct regmap *regmap;
+	int reg, ret;
+	u8 bit;
+	u32 val;
+
+	rk3026_calc_pull_reg_and_bit(bank, pin_num, &regmap, &reg, &bit);
+	ret = regmap_read(regmap, reg, &val);
+	if (ret)
+		return ret;
+
+	/* 1 = the pad's built-in pull is switched off */
+	return (val & BIT(bit)) ? PIN_CONFIG_BIAS_DISABLE :
+				  PIN_CONFIG_BIAS_PULL_PIN_DEFAULT;
+}
+
 static struct rockchip_pin_bank rk3026_pin_banks[] = {
 	PIN_BANK(0, 32, "gpio0"),
 	PIN_BANK(1, 32, "gpio1"),
@@ -99,6 +116,7 @@ static const struct rockchip_pin_ctrl rk3026_pin_ctrl = {
 	.grf_mux_offset		= 0xa8,
 	.set_mux		= rk3026_set_mux,
 	.set_pull		= rk3026_set_pull,
+	.get_pull		= rk3026_get_pull,
 };
 
 static const struct udevice_id rk3026_pinctrl_ids[] = {
