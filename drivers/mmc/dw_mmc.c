@@ -16,6 +16,7 @@
 #include <wait_bit.h>
 #include <asm/cache.h>
 #include <linux/delay.h>
+#include <linux/err.h>
 #include <power/regulator.h>
 
 #define PAGE_SIZE 4096
@@ -575,6 +576,22 @@ static int dwmci_setup_bus(struct dwmci_host *host, u32 freq)
 	 */
 	if (host->get_mmc_clk) {
 		sclk = host->get_mmc_clk(host, freq);
+		/*
+		 * get_mmc_clk() reports failure by returning 0 or a negative
+		 * errno cast to unsigned long, and neither can be used as a
+		 * source rate. Unchecked, sclk == 0 makes div 0 below, which is
+		 * BYPASS mode -- the card then runs at the full source clock
+		 * while host->clock records the rate that was asked for, so the
+		 * driver believes it is at 400 kHz during identification and the
+		 * first data transfer times out. That is exactly the signature
+		 * debugged on an rk3026 on 2026-07-29 (bypass at 1.78 MHz,
+		 * ACMD51 SEND_SCR returning -110), reached there by a divider
+		 * overflow rather than by this path.
+		 */
+		if (IS_ERR_VALUE(sclk) || !sclk) {
+			log_err("%s: bad source clock %ld\n", __func__, sclk);
+			return -EINVAL;
+		}
 	} else if (host->bus_hz) {
 		sclk = host->bus_hz;
 	} else {

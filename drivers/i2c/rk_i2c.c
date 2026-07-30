@@ -19,6 +19,7 @@
 #include <asm/arch-rockchip/periph.h>
 #include <dm/pinctrl.h>
 #include <linux/delay.h>
+#include <linux/err.h>
 #include <linux/sizes.h>
 
 /* i2c timerout */
@@ -68,13 +69,32 @@ static inline void rk_i2c_get_div(int div, int *divh, int *divl)
  * SCL = PCLK / SCLK Divisor
  * i2c_rate = PCLK
  */
-static void rk_i2c_set_clk(struct rk_i2c *i2c, uint32_t scl_rate)
+static int rk_i2c_set_clk(struct rk_i2c *i2c, uint32_t scl_rate)
 {
-	uint32_t i2c_rate;
+	ulong i2c_rate;
 	int div, divl, divh;
 
 	/* First get i2c rate from pclk */
 	i2c_rate = clk_get_rate(&i2c->clk);
+
+	/*
+	 * clk_get_rate() returns a negative errno cast to ulong when the clock
+	 * driver does not model this id, so it MUST be tested -- unchecked, an
+	 * -ENOENT arrives as 0xfffffffe and the divider below comes out around
+	 * 2683, dropping SCL to roughly 3 kHz off a 66 MHz PCLK. Measured exactly
+	 * that way on an rk3026 on 2026-07-30: every transfer crawled and `i2c
+	 * probe` returned an empty list while the pads and the controller select
+	 * were independently verified correct.
+	 *
+	 * A rate of 0 is just as bad and is NOT caught by IS_ERR_VALUE: it makes
+	 * div negative, the `if (div >= 0)` guard below then leaves CLKDIV at 0,
+	 * and the controller runs at PCLK/16 -- about 4.1 MHz. That guard is not
+	 * an error check; it silently converts a bad rate into a bad clock.
+	 */
+	if (IS_ERR_VALUE(i2c_rate) || !i2c_rate) {
+		log_err("%s: bad parent clock rate %ld\n", __func__, i2c_rate);
+		return -EINVAL;
+	}
 
 	div = DIV_ROUND_UP(i2c_rate, scl_rate * 8) - 2;
 	divh = 0;
@@ -83,10 +103,12 @@ static void rk_i2c_set_clk(struct rk_i2c *i2c, uint32_t scl_rate)
 		rk_i2c_get_div(div, &divh, &divl);
 	writel(I2C_CLKDIV_VAL(divl, divh), &i2c->regs->clkdiv);
 
-	debug("rk_i2c_set_clk: i2c rate = %d, scl rate = %d\n", i2c_rate,
+	debug("rk_i2c_set_clk: i2c rate = %ld, scl rate = %d\n", i2c_rate,
 	      scl_rate);
 	debug("set i2c clk div = %d, divh = %d, divl = %d\n", div, divh, divl);
 	debug("set clk(I2C_CLKDIV: 0x%08x)\n", readl(&i2c->regs->clkdiv));
+
+	return 0;
 }
 
 static void rk_i2c_show_regs(struct i2c_regs *regs)
@@ -389,9 +411,7 @@ int rockchip_i2c_set_bus_speed(struct udevice *bus, unsigned int speed)
 {
 	struct rk_i2c *i2c = dev_get_priv(bus);
 
-	rk_i2c_set_clk(i2c, speed);
-
-	return 0;
+	return rk_i2c_set_clk(i2c, speed);
 }
 
 static int rockchip_i2c_of_to_plat(struct udevice *bus)
