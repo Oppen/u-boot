@@ -54,7 +54,7 @@ DECLARE_GLOBAL_DATA_PTR;
  *   early_init_f     1:8, one pulse    looks dark, ticks on
  *   dram_init        two equal taps    tap-tap ... pause
  *   misc_init_r      three equal taps  tap-tap-tap ... pause
- *   last_stage_init  dash-dot          long glow, short tap  -- FOREVER
+ *   last_stage_init  dash-dot          long glow, short tap
  *
  * No two stages share a signature, where signature means (duty ratio, pulses
  * per group, whether those pulses are equal). That matters more than it looks:
@@ -425,12 +425,20 @@ static int boox_last_stage(void)
 	 * something polls the console, and nothing polls before the main loop --
 	 * so halting here made a USB console impossible to observe.
 	 *
-	 * Spin delays, not mdelay(): this rhythm previously ran with use_timer =
-	 * true, and with the timebase unverified a dead get_timer() blocks inside
-	 * the first delay and leaves the LED at a fixed level -- indistinguishable
-	 * from a crash.
+	 * mdelay(), not a spin: get_timer() has been verified on hardware since
+	 * 2026-07-29 (card 78) and misc_init_r above already runs its rhythm off the
+	 * timer on the same boot. The spin here dated from the era of a dead
+	 * timebase, when a blocked get_timer() left the LED at a fixed level and
+	 * looked exactly like a crash.
+	 *
+	 * The two PRE-RELOCATION rhythms (board_early_init_f, dram_init) stay on
+	 * spins deliberately: they run before timer_init() in board_f's sequence, so
+	 * there is no timebase to use yet. Their spin constant is calibrated for a
+	 * ~24 MHz CPU and the core now runs at 600 MHz, so those two rhythms are
+	 * roughly 25x faster than their nominal ms -- the ratios still identify the
+	 * stage, which is the property the scheme was designed around.
 	 */
-	led_rhythm_run(&boox_rhythms[BOOX_LAST_STAGE], false);
+	led_rhythm_run(&boox_rhythms[BOOX_LAST_STAGE], true);
 
 	return 0;
 }
