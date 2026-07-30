@@ -4,3 +4,7 @@
 
 obj-y += rk3026.o
 obj-y += sdram_rk3026.o
+
+ifndef CONFIG_XPL_BUILD
+obj-y += syscon_rk3026.o
+endif

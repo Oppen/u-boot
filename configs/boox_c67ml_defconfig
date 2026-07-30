@@ -137,7 +137,17 @@ CONFIG_SYSCON=y
 # board_late_init, inside the failing window.
 # CONFIG_ADC is not set
 CONFIG_CLK=y
-# CONFIG_DM_I2C is not set
+# I2C is ON as of 2026-07-30, which is the "restore this group when the panel or
+# charger needs a rail" case the header block anticipated: the EPD rails are
+# unreachable without it (docs/BLOCKERS.md item 4).
+#
+# DM_PMIC / DM_REGULATOR stay OFF deliberately, so this is one variable: with
+# DM_REGULATOR off the sdmmc node's vmmc-supply/vqmmc-supply phandles remain
+# inert and MMC behaviour cannot shift underneath the i2c test. The act8931,
+# tps65185 and cyttsp nodes have no matching driver either, so only the two i2c
+# CONTROLLERS probe.
+CONFIG_DM_I2C=y
+CONFIG_SYS_I2C_ROCKCHIP=y
 CONFIG_PINCTRL=y
 # CONFIG_DM_REGULATOR is not set
 # CONFIG_SPL_DM_SERIAL is not set
@@ -182,6 +192,11 @@ CONFIG_CMD_MMC=y
 # Rockchip pinctrl driver and relies on whatever the BootROM left behind.
 CONFIG_CMD_CLK=y
 CONFIG_CMD_GPIO=y
+# `i2c dev N; i2c probe` is the whole point of enabling i2c during bring-up: it
+# independently checks the four controller base addresses, the pinctrl groups and
+# the PCLK_I2C gates all at once, against slaves whose addresses are known
+# device-tier (docs/HARDWARE-CONSTANTS.md §9).
+CONFIG_CMD_I2C=y
 # No autoboot during bring-up: -1 means "never autoboot, wait for input", so the
 # prompt is always reachable.
 #

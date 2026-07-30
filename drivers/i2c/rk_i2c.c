@@ -11,8 +11,10 @@
 #include <errno.h>
 #include <i2c.h>
 #include <log.h>
+#include <syscon.h>
 #include <asm/io.h>
 #include <asm/arch-rockchip/clock.h>
+#include <asm/arch-rockchip/hardware.h>
 #include <asm/arch-rockchip/i2c.h>
 #include <asm/arch-rockchip/periph.h>
 #include <dm/pinctrl.h>
@@ -39,9 +41,17 @@ enum {
 
 /**
  * @controller_type: i2c controller type
+ * @grf_i2c_sel_reg: GRF offset of the RKI2C controller-select register, or 0 if
+ *	this SoC has no such select. Some parts wire each channel to either the
+ *	legacy Synopsys DW-I2C block or Rockchip's own RKI2C, chosen by a
+ *	hiword-masked GRF bit that no bootloader stage sets.
+ * @grf_i2c_sel_shift: bit position of channel 0's select; channel n is
+ *	@grf_i2c_sel_shift + n. 1 selects RKI2C.
  */
 struct rk_i2c_soc_data {
 	int controller_type;
+	int grf_i2c_sel_reg;
+	int grf_i2c_sel_shift;
 };
 
 static inline void rk_i2c_get_div(int div, int *divh, int *divl)
@@ -411,6 +421,32 @@ static int rockchip_i2c_probe(struct udevice *bus)
 
 	soc_data = (struct rk_i2c_soc_data*)dev_get_driver_data(bus);
 
+	/*
+	 * Select Rockchip's own RKI2C block for this channel. Needed on parts
+	 * that mux each channel against the legacy Synopsys DW-I2C block, where
+	 * no bootloader stage sets the bit and the SoC's own reset clears it --
+	 * so without this the controller answers nothing after a warm reset that
+	 * wipes the GRF, while appearing to work on a boot that inherited the
+	 * bit from a previously running kernel.
+	 */
+	if (soc_data->grf_i2c_sel_reg) {
+		void *grf = syscon_get_first_range(ROCKCHIP_SYSCON_GRF);
+
+		if (IS_ERR(grf))
+			return PTR_ERR(grf);
+
+		ret = dev_read_alias_seq(bus, &bus_nr);
+		if (ret < 0) {
+			debug("%s: Could not get alias for %s: %d\n",
+			      __func__, bus->name, ret);
+			return ret;
+		}
+
+		rk_clrsetreg(grf + soc_data->grf_i2c_sel_reg,
+			     BIT(soc_data->grf_i2c_sel_shift + bus_nr),
+			     BIT(soc_data->grf_i2c_sel_shift + bus_nr));
+	}
+
 	if (soc_data->controller_type == RK_I2C_LEGACY) {
 		ret = dev_read_alias_seq(bus, &bus_nr);
 		if (ret < 0) {
@@ -442,6 +478,22 @@ static const struct dm_i2c_ops rockchip_i2c_ops = {
 	.set_bus_speed	= rockchip_i2c_set_bus_speed,
 };
 
+/*
+ * RK3026 (RK2928 class) has both blocks, at separate windows: the DW-I2C ones at
+ * 0x20070000+ read all zeros while the RKI2C ones at 0x20072000+ carry live
+ * traffic. It still needs the GRF select -- the vendor kernel's i2c_adap_sel()
+ * writes GRF_SOC_CON1 bit (11 + channel) at probe, and no bootloader stage
+ * touches that register. See docs/HARDWARE-CONSTANTS.md.
+ *
+ * RK_I2C_NEW because the LEGACY path's pinctrl_request_noflags() cannot work:
+ * no rockchip pinctrl driver has implemented a .request op since 2017.
+ */
+static const struct rk_i2c_soc_data rk3026_soc_data = {
+	.controller_type = RK_I2C_NEW,
+	.grf_i2c_sel_reg = 0x144,
+	.grf_i2c_sel_shift = 11,
+};
+
 static const struct rk_i2c_soc_data rk3066_soc_data = {
 	.controller_type = RK_I2C_LEGACY,
 };
@@ -467,6 +519,16 @@ static const struct rk_i2c_soc_data rk3399_soc_data = {
 };
 
 static const struct udevice_id rockchip_i2c_ids[] = {
+	/*
+	 * First: U-Boot matches in THIS array's order, not in the order the node
+	 * lists its compatibles. Our nodes carry
+	 * "rockchip,rk3026-i2c", "rockchip,rk3288-i2c", and the rk3288 entry
+	 * would otherwise win and skip the GRF select.
+	 */
+	{
+		.compatible = "rockchip,rk3026-i2c",
+		.data = (ulong)&rk3026_soc_data,
+	},
 	{
 		.compatible = "rockchip,rk3066-i2c",
 		.data = (ulong)&rk3066_soc_data,

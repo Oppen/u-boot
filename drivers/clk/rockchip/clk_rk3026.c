@@ -370,6 +370,38 @@ static ulong rockchip_mmc_set_clk(struct rk3026_cru *cru, uint gpll_rate,
 	return rockchip_mmc_get_clk(cru, gpll_rate, periph);
 }
 
+/*
+ * The peripheral bus tree, read from the live dividers rather than assumed from
+ * the *_HZ constants -- those describe what rkclk_init() intends to program, and
+ * a consumer needs what is actually there.
+ *
+ * CLKSEL_CON10 encodes two different divider styles, which is a documented trap
+ * (cru_rk3026.h): PERI_ACLK is a freedivider off the selected PLL, /(n+1), while
+ * PERI_HCLK and PERI_PCLK are SHIFTS off PERI_ACLK, >>n.
+ */
+static ulong rk3026_peri_get_rate(struct rk3026_cru *cru, ulong gpll_rate,
+				  ulong cpll_rate, int id)
+{
+	u32 con = readl(&cru->cru_clksel_con[10]);
+	ulong parent, aclk;
+	u32 div;
+
+	parent = ((con & PERI_PLL_SEL_MASK) >> PERI_PLL_SEL_SHIFT) ==
+			PERI_PLL_CPLL ? cpll_rate : gpll_rate;
+
+	div = (con & PERI_ACLK_DIV_MASK) >> PERI_ACLK_DIV_SHIFT;
+	aclk = parent / (div + 1);
+
+	switch (id) {
+	case ACLK_PERI:
+		return aclk;
+	case HCLK_PERI:
+		return aclk >> ((con & PERI_HCLK_DIV_MASK) >> PERI_HCLK_DIV_SHIFT);
+	default:
+		return aclk >> ((con & PERI_PCLK_DIV_MASK) >> PERI_PCLK_DIV_SHIFT);
+	}
+}
+
 static ulong rk3026_clk_get_rate(struct clk *clk)
 {
 	struct rk3026_clk_priv *priv = dev_get_priv(clk->dev);
@@ -387,6 +419,34 @@ static ulong rk3026_clk_get_rate(struct clk *clk)
 	case SCLK_SDIO:
 		gclk_rate = rkclk_pll_get_rate(priv->cru, CLK_GENERAL);
 		return rockchip_mmc_get_clk(priv->cru, gclk_rate, clk->id);
+	/*
+	 * The peripheral bus roots, and the APB clocks that hang off PCLK_PERI.
+	 * rk_i2c calls clk_get_rate() with NO IS_ERR_VALUE() check
+	 * (drivers/i2c/rk_i2c.c:77), so an unhandled id here becomes 0xfffffffe
+	 * and lands as a ~2683 divider: SCL drops to about 3 kHz off a 66 MHz
+	 * PCLK and every transfer crawls, then times out. MEASURED that way on
+	 * hardware 2026-07-30 -- `i2c probe` returned an empty list on both
+	 * buses while the GRF select and the pad mux were both verified correct.
+	 *
+	 * NOT LISTED, DELIBERATELY: PCLK_TIMER0. timer_pre_probe() takes clk
+	 * index 0 as the timer's COUNTING rate and returns before reading the
+	 * DT's clock-frequency, so teaching this switch about PCLK_TIMER0 would
+	 * silently run the timebase at the APB rate instead of xin24m's 24 MHz.
+	 * See docs/PORT-FIXES.md §3b.
+	 */
+	case ACLK_PERI:
+	case HCLK_PERI:
+	case PCLK_PERI:
+	case PCLK_I2C0:
+	case PCLK_I2C1:
+	case PCLK_I2C2:
+	case PCLK_I2C3:
+		return rk3026_peri_get_rate(priv->cru,
+					    rkclk_pll_get_rate(priv->cru,
+							       CLK_GENERAL),
+					    rkclk_pll_get_rate(priv->cru,
+							       CLK_CODEC),
+					    clk->id);
 	default:
 		return -ENOENT;
 	}
