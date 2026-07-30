@@ -55,7 +55,14 @@
  * this overlay is the one file no canonical sync overwrites.
  *
  * 24 MHz is device-measured (timer1 sampled 30 s apart: 24,000,665 Hz).
- * Remove once rk3026_clk_get_rate() handles PCLK_TIMER0.
+ *
+ * ⚠️ DO NOT remove this by teaching rk3026_clk_get_rate() about PCLK_TIMER0.
+ * An earlier revision of this comment suggested exactly that, which is a trap:
+ * timer_pre_probe() takes clk index 0 as the COUNTING rate and returns at
+ * timer-uclass.c:70 before it ever reads clock-frequency, so the timebase would
+ * silently run at the ~66 MHz APB rate instead of xin24m's 24 MHz. Retiring this
+ * property needs timer_pre_probe() fixed to prefer the "timer"-named clock --
+ * an upstream change. See docs/PORT-FIXES.md §3b.
  */
 &{/timer@20044000} {
 	clock-frequency = <24000000>;
