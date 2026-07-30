@@ -40,3 +40,23 @@
 	 * it applies to the kernel build too, so it belongs in one place.
 	 * See that file's &sdmmc node for the measurement it's based on. */
 };
+
+/*
+ * timer_pre_probe() asks the CRU for PCLK_TIMER0 first and
+ * rk3026_clk_get_rate() has no case for it, so without this property
+ * clock_rate stays 0 and timer_post_probe() rejects the device.  A dead
+ * get_timer() then makes wait_for_bit_le32() spin forever instead of timing
+ * out (include/wait_bit.h:45), which hangs acm_stdio_start() -- the LED
+ * rhythms still run (spin loops) but USB never enumerates.
+ *
+ * PROVEN on hardware 2026-07-29 (card 78, 4:1 match).  Regressed 2026-07-29
+ * by f513e0e, which copied the canonical dtsi over this tree's; kept here
+ * rather than in dts/ because it is a U-Boot driver workaround and because
+ * this overlay is the one file no canonical sync overwrites.
+ *
+ * 24 MHz is device-measured (timer1 sampled 30 s apart: 24,000,665 Hz).
+ * Remove once rk3026_clk_get_rate() handles PCLK_TIMER0.
+ */
+&{/timer@20044000} {
+	clock-frequency = <24000000>;
+};
