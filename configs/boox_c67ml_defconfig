@@ -205,6 +205,17 @@ CONFIG_CMD_MMC=y
 # whether the sdmmc pads are still muxed, which matters because this port has no
 # Rockchip pinctrl driver and relies on whatever the BootROM left behind.
 CONFIG_CMD_CLK=y
+# `icache` / `dcache` -- read-outs, not inferences. Two things need them:
+#
+#  1. Nothing in this port can currently read SCTLR.I back, so the 2026-07-31
+#     SPL cpu_init_cp15 change is committed with its effect UNVERIFIED. `icache`
+#     prints the state directly.
+#  2. `go` at the prompt executes stale memory: U-Boot proper runs with the
+#     D-cache on, so `mw.l` lands in the D-cache and `md.l` reads it back
+#     correctly while the instruction fetcher sees the old bytes. That is what
+#     made the CNTFRQ probe jump into garbage on 2026-07-31. `dcache flush`
+#     (or `dcache off`) before `go` fixes it.
+CONFIG_CMD_CACHE=y
 CONFIG_CMD_GPIO=y
 # `i2c dev N; i2c probe` is the whole point of enabling i2c during bring-up: it
 # independently checks the four controller base addresses, the pinctrl groups and
