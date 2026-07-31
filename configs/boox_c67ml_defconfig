@@ -55,7 +55,21 @@
 
 CONFIG_ARM=y
 CONFIG_SKIP_LOWLEVEL_INIT=y
-CONFIG_SPL_SKIP_LOWLEVEL_INIT=y
+# SPL: run cpu_init_cp15, skip only lowlevel_init.
+#
+# SPL_SKIP_LOWLEVEL_INIT=y skipped BOTH (start.S:118), so the SPL ran with the
+# I-cache off and ACTLR.SMP clear, executing from SRAM -- which is why
+# sdram_init() and the spin delays are glacial. SPL_SKIP_LOWLEVEL_INIT_ONLY
+# keeps lowlevel_init() unreached (we have none to provide) while restoring the
+# CP15 init: its own help says "The normal CP15 init (such as enabling the
+# instruction cache) is still performed."
+#
+# Deliberately NOT a cache free-for-all: cpu_init_cp15 CLEARS SCTLR bits 2:0,
+# so the MMU and D-cache stay off. It sets only I-cache (bit 12), BTB (bit 11),
+# Align (bit 1) and ACTLR bit 6 (SMP/coherency). D-cache in a back-to-BROM SPL
+# that hands DRAM back to the mask ROM is a separate, riskier experiment.
+# CONFIG_SPL_SKIP_LOWLEVEL_INIT is not set
+CONFIG_SPL_SKIP_LOWLEVEL_INIT_ONLY=y
 # CONFIG_SPL_USE_ARCH_MEMCPY is not set
 # CONFIG_SPL_USE_ARCH_MEMSET is not set
 CONFIG_ARCH_ROCKCHIP=y
