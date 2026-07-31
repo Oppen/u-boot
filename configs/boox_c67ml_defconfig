@@ -25,8 +25,18 @@
 # Defaults that are already off, so they need no line here, with the reasons
 # worth keeping (each was established the hard way):
 #
-#   CMD_EXT4 / CMD_FS_GENERIC / CMD_USB / CMD_GPT / CMD_I2C — not needed to load a
-#     zImage. U-Boot stays FAT-only; EXT4 does not come back with CMD_FAT.
+#   CMD_USB / CMD_GPT — not needed to load a zImage. (CMD_I2C is now ON, see the
+#     i2c block below.)
+#
+#   ⚠️ "U-Boot stays FAT-only; EXT4 does not come back with CMD_FAT" — THIS WAS
+#     FALSE, corrected 2026-07-31. The built .config has FS_EXT4=y, CMD_EXT4=y,
+#     CMD_EXT2=y and CMD_FS_GENERIC=y, because BOOTSTD_DEFAULTS pulls in
+#     BOOT_DEFAULTS_CMDS, which HARD-`select`s them (boot/Kconfig:425). A
+#     defconfig negation cannot override a select; only dropping BOOTSTD_DEFAULTS
+#     (itself merely `imply`'d, so negatable) removes them -- and that must
+#     re-add CMD_BOOTZ and CMD_FAT explicitly in the same commit, or extlinux
+#     silently boots nothing (CMD_BOOTZ has no `default y`; it exists only via
+#     that same select, and pxe_utils.c falls through every arm without it).
 #     (MMC and CMD_FAT/CMD_MMC were re-enabled 2026-07-29 -- see the MMC block
 #     below. DM_MMC cannot be negated from a defconfig anyway: non-prompted bool,
 #     selected by MMC, and MMC is `default ARM`. Turning MMC fully off was worth
@@ -228,10 +238,21 @@ CONFIG_MMC_DW_ROCKCHIP=y
 CONFIG_CMD_MMC=y
 # Bring-up diagnostics reachable from the ACM console. `mmc dev` fails silently
 # (cmd/mmc.c returns CMD_RET_FAILURE with no print), so the state it depends on
-# has to be readable some other way: CMD_CLK shows whether sclk_sdmmc resolved
-# at all -- clk_rk3026.c has no get_rate case for every id -- and CMD_GPIO shows
-# whether the sdmmc pads are still muxed, which matters because this port has no
-# Rockchip pinctrl driver and relies on whatever the BootROM left behind.
+# has to be readable some other way.
+#
+# ⚠️ Two corrections to the reasoning that first put these here (2026-07-31):
+#
+#  - CMD_CLK does NOT "show whether sclk_sdmmc resolved". `clk dump` walks CLK
+#    uclass UDEVICES, and UCLASS_DRIVER(clk) has no per_device_auto, so it cannot
+#    see CRU-derived rates at all -- it prints only `xin24m`, echoing a DT
+#    property back. Read the CRU directly instead: `md.l 0x20000000 0x15` and
+#    `md.l 0x200000d0 0xa`. Kept because it is nearly free, not because it works
+#    as advertised.
+#  - "this port has no Rockchip pinctrl driver" is stale: pinctrl-rk3026.c landed
+#    2026-07-30 (fdb5b10) and is proven, with introspection ops, so
+#    `pinmux status <pin>` is the better pad read-out. CMD_GPIO stays, but note
+#    no GPIO *driver* is enabled yet, so it lists no banks -- ROCKCHIP_GPIO is
+#    queued to fix that.
 # Boot timing, so boot-speed work has a NUMBER instead of an impression.
 #
 # This was off by accident, not by decision -- it has no default and nobody

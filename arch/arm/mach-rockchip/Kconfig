@@ -36,7 +36,15 @@ config ROCKCHIP_RK3026
 	  with Mali-400 graphics, an E Ink display controller (EBC), 512 MB
 	  DDR3, and the usual SDIO, UART, SPI, I2C and PWM peripherals.  Used
 	  in 6" e-readers such as the ONYX BOOX C67ML Magellan.  The SPL uses
-	  the Rockchip back-to-BROM flow, delegating DDR init to the mask ROM.
+	  the Rockchip back-to-BROM flow: it trains DRAM itself, then returns to
+	  the mask ROM, which loads U-Boot proper into DRAM at 0x60000000.
+
+	  DDR init is the SPL's, not the ROM's.  The BROM never touches the DDR
+	  controller: no literal anywhere in the dumped ROM references the DDR
+	  PCTL (0x20004000) or PHY (0x2000a000) -- an exhaustive negative from
+	  its disassembly.  Rockchip's own chain agrees, shipping a 4 KiB DDR
+	  init blob loaded at 0x10080800, the slot the SPL occupies.  An earlier
+	  revision of this text said the ROM did it; that was wrong.
 
 config ROCKCHIP_RK3036
 	bool "Support Rockchip RK3036"
