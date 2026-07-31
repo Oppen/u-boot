@@ -32,35 +32,53 @@
 /*
  * Delays.
  *
- * Two things were measured on hardware to get here, and both matter:
+ * WHAT IS ESTABLISHED, and it is less than an earlier version of this comment
+ * claimed:
  *
- *  1. The counter at 0x200440a0 works, but runs at 24 MHz / 64 = 375 kHz, not
- *     the 24 MHz its name suggests. An SPL delay written for 24 MHz took 65 s
- *     for a requested 1 s -- repeatably, timed by hand. 65 vs the ideal 64 is
- *     1.6%, i.e. loop overhead. So it is a perfectly good timebase once its
- *     rate is right, and it is immune to whatever the CPU clock is doing.
+ *  1. The counter at 0x200440a0 DOES NOT ADVANCE. Settled 2026-07-28; the
+ *     register reads zero (docs/HARDWARE-CONSTANTS.md). So rockchip_stimer_init()
+ *     below leaves stimer_ticks false and every __udelay() here has always taken
+ *     the spin fallback.
  *
- *  2. Replacing it with a CPU spin loop was worse. The counter is volatile and
- *     lives on the stack, the SPL runs from SRAM with caches off, so each
- *     iteration is a load and a store to uncached memory -- far more than the
- *     ~4 cycles a spin loop is usually costed at. The blink slowed until it
- *     looked solid.
+ *     Retracted with it: the old "24 MHz / 64 = 375 kHz, MEASURED" claim. The
+ *     symptom behind it stands -- a delay written for 24 MHz took ~65 s for a
+ *     requested 1 s, timed by hand -- but the cause was the spin, not a divided
+ *     clock. TIMER_HZ below is therefore a dead constant on this hardware. It is
+ *     kept because the runtime probe is what decides, and if a future board or
+ *     boot stage does make the block count, an unproven rate is better than
+ *     removing the path.
  *
- * So: use the timer, with the measured rate, and keep a spin only as a fallback
- * for the case where the counter is not advancing at all. Compute ticks in 64
- * bits -- at 375 kHz, TIMER_HZ / 1000000 truncates to zero in integer maths and
- * every delay would silently become no delay.
+ *  2. The spin is slow, and that is the reason delays here are glacial rather
+ *     than wrong. sdram_init() runs far behind its intended timing. DDR delays
+ *     are minimums, so slow is safe and fast is not -- which is why this has not
+ *     been "optimised".
  *
- * This configuration is the one that reached "DRAM trained" and handed off to
- * U-Boot proper over SD (2026-07-27 session, observed by the maintainer). A
- * later switch to lib/time.c's CFG_SYS_TIMER_* path, and a 2026-07-28 move to
- * timer0 at 0x20044000, each stopped it booting. Do not replace it again
- * without a boot as evidence.
+ *     The SPL also runs before our PLL setup (that happens in the CRU probe, in
+ *     U-Boot proper, from DRAM -- the wrong stage, see docs/UPSTREAM-ALIGNMENT.md),
+ *     so the core is still near 24 MHz here. Behavioural corroboration: the
+ *     pre-relocation LED rhythms look slower than the post-relocation ones.
+ *
+ * THE SPL TIMEBASE IS UNVERIFIED. `sleep 30` proved get_timer()/mdelay() in
+ * U-Boot proper only (2026-07-30); nothing equivalent exists for this binary.
+ *
+ * Compute ticks in 64 bits regardless: at a low TIMER_HZ, TIMER_HZ / 1000000
+ * truncates to zero in integer maths and every delay would silently vanish.
+ *
+ * This file is the configuration that reached "DRAM trained" and handed off to
+ * U-Boot proper over SD (2026-07-27, observed by the maintainer). A later switch
+ * to lib/time.c's CFG_SYS_TIMER_* path, and a 2026-07-28 move to timer0 at
+ * 0x20044000, each stopped it booting. Do not replace it again without a boot as
+ * evidence -- and see the CONFIG_ROCKCHIP_STIMER_BASE help in rk3026/Kconfig,
+ * which makes the same point about the address.
  */
 #define STIMER		((struct rk_timer *)CONFIG_ROCKCHIP_STIMER_BASE)
-#define TIMER_HZ	375000		/* measured: 24 MHz / 64 */
+/* Dead on this hardware -- the counter never advances; see above. */
+#define TIMER_HZ	375000
 
-/* Deliberately generous: only used if the counter is dead, where slow beats hung. */
+/*
+ * Deliberately generous, where slow beats hung. On this hardware the counter is
+ * dead, so this is not a fallback -- it is the only path ever taken.
+ */
 #define SPL_FALLBACK_LOOPS_PER_US	12
 
 static bool stimer_ticks;
