@@ -184,6 +184,34 @@ CONFIG_USB_GADGET_MANUFACTURER="ONYX"
 CONFIG_USB_GADGET_PRODUCT_NUM=0x0010
 CONFIG_USB_GADGET_DWC2_OTG=y
 CONFIG_USB_FUNCTION_ACM=y
+# Fastboot is not a board choice -- arch/arm/Kconfig:2114 has
+# `imply USB_FUNCTION_FASTBOOT` under ARCH_ROCKCHIP, which then
+# `select FASTBOOT`, which `imply ANDROID_BOOT_IMAGE` and `imply CMD_FASTBOOT`.
+# An imply loses to an explicit negation, so one line removes the chain.
+#
+# We do not use it: flashing goes over rockusb/rkflashtool in the vendor loader,
+# and the interactive channel is the ACM console. It is also the symbol whose
+# defaults list had no ROCKCHIP_RK3026 entry and caused the infinite
+# FASTBOOT_BUF_ADDR reprompt documented in docs/HOW-TO.md §0.
+#
+# Measured: 318,080 -> 302,816 B of u-boot.bin (-15,264).
+#
+# ⚠️ USB_GADGET_DOWNLOAD MUST BE SET EXPLICITLY, AND THAT IS WHY THE LINE BELOW
+# EXISTS. Dropping fastboot alone silently kills the console:
+#
+#   - USB_FUNCTION_ACM is declared INSIDE `if USB_GADGET_DOWNLOAD`
+#     (drivers/usb/gadget/Kconfig:193-232), so it is not even selectable
+#     without it -- it disappears from .config entirely rather than turning off.
+#   - USB_GADGET_DOWNLOAD is a prompted bool with NO default, and the only
+#     `select USB_GADGET_DOWNLOAD` in the whole tree is drivers/fastboot/Kconfig:25.
+#   - f_acm.c:646 calls g_dnl_register("usb_serial_acm").
+#
+# So the ACM console had been standing on fastboot by accident. Caught in the
+# build, not on hardware: the first attempt produced a card whose u-boot.bin was
+# 37,496 B smaller because it had lost the console stack, which would have
+# presented as the 2026-07-30 "board alive, console dead" regression.
+CONFIG_USB_GADGET_DOWNLOAD=y
+# CONFIG_USB_FUNCTION_FASTBOOT is not set
 CONFIG_SYS_TIMER_COUNTS_DOWN=y
 CONFIG_SPL_TINY_MEMSET=y
 # MMC, re-enabled 2026-07-29. It was off because initr_mmc (board_r.c:748) runs
