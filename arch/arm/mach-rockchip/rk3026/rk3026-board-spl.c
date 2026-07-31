@@ -30,23 +30,25 @@
 #include <spl.h>
 
 /*
- * Delays.
+ * Delays. Spin only -- the hardware timer path was REMOVED 2026-07-31.
  *
- * WHAT IS ESTABLISHED, and it is less than an earlier version of this comment
- * claimed:
+ * Why it went, and what it cost to keep:
  *
  *  1. The counter at 0x200440a0 DOES NOT ADVANCE. Settled 2026-07-28; the
- *     register reads zero (docs/HARDWARE-CONSTANTS.md). So rockchip_stimer_init()
- *     below leaves stimer_ticks false and every __udelay() here has always taken
- *     the spin fallback.
+ *     register reads zero (docs/HARDWARE-CONSTANTS.md). The old code probed it
+ *     at init, found it dead every time, and fell back to the spin -- so the
+ *     timer arithmetic never executed on this hardware.
  *
  *     Retracted with it: the old "24 MHz / 64 = 375 kHz, MEASURED" claim. The
  *     symptom behind it stands -- a delay written for 24 MHz took ~65 s for a
  *     requested 1 s, timed by hand -- but the cause was the spin, not a divided
- *     clock. TIMER_HZ below is therefore a dead constant on this hardware. It is
- *     kept because the runtime probe is what decides, and if a future board or
- *     boot stage does make the block count, an unproven rate is better than
- *     removing the path.
+ *     clock.
+ *
+ *     It was not free. `(u64)usec * TIMER_HZ / 1000000` was the SPL's only
+ *     caller of __aeabi_uldivmod, which in turn pulled in lib1funcs.o:
+ *     424 + 392 = 816 bytes, 21% of a 3880-byte binary against a 6144-byte
+ *     SRAM budget, to compute ticks for a counter that does not tick.
+ *     Measured with scripts/spl-size-report.py.
  *
  *  2. The spin is slow, and that is the reason delays here are glacial rather
  *     than wrong. sdram_init() runs far behind its intended timing. DDR delays
@@ -61,8 +63,6 @@
  * THE SPL TIMEBASE IS UNVERIFIED. `sleep 30` proved get_timer()/mdelay() in
  * U-Boot proper only (2026-07-30); nothing equivalent exists for this binary.
  *
- * Compute ticks in 64 bits regardless: at a low TIMER_HZ, TIMER_HZ / 1000000
- * truncates to zero in integer maths and every delay would silently vanish.
  *
  * This file is the configuration that reached "DRAM trained" and handed off to
  * U-Boot proper over SD (2026-07-27, observed by the maintainer). A later switch
@@ -71,19 +71,13 @@
  * evidence -- and see the CONFIG_ROCKCHIP_STIMER_BASE help in rk3026/Kconfig,
  * which makes the same point about the address.
  */
-#define STIMER		((struct rk_timer *)CONFIG_ROCKCHIP_STIMER_BASE)
-/* Dead on this hardware -- the counter never advances; see above. */
-#define TIMER_HZ	375000
-
 /*
- * Deliberately generous, where slow beats hung. On this hardware the counter is
- * dead, so this is not a fallback -- it is the only path ever taken.
+ * Deliberately generous, where slow beats hung. This is the ONLY delay path in
+ * the SPL -- see the removal note above.
  */
 #define SPL_FALLBACK_LOOPS_PER_US	12
 
-static bool stimer_ticks;
-
-static void __udelay_spin(unsigned long usec)
+void __udelay(unsigned long usec)
 {
 	volatile u32 i;
 	u32 loops = usec * SPL_FALLBACK_LOOPS_PER_US;
@@ -92,48 +86,17 @@ static void __udelay_spin(unsigned long usec)
 		;
 }
 
-void __udelay(unsigned long usec)
-{
-	u32 start, ticks;
-
-	if (!stimer_ticks) {
-		__udelay_spin(usec);
-		return;
-	}
-
-	ticks = (u32)((u64)usec * TIMER_HZ / 1000000);
-	start = readl(&STIMER->timer_curr_value0);
-
-	while ((start - readl(&STIMER->timer_curr_value0)) < ticks)
-		;
-}
-
 /*
- * Override the weak generic version: it writes CNTFRQ (mcr p15,0,c14,c0,0),
- * undefined on Cortex-A9. Start the free-running down-counter, then check it
- * actually advances -- a dead block reads a constant and every __udelay() would
- * spin forever on it.
+ * MUST remain an override even though it does nothing.
+ *
+ * The weak generic version (arch/arm/mach-rockchip/spl_common.c) writes CNTFRQ
+ * with `mcr p15, 0, %0, c14, c0, 0`. That is the ARM Generic Timer, which
+ * Cortex-A9 does not implement (DDI0407I has no CNTFRQ/CNTPCT at all), so the
+ * instruction is UNDEFINED here. Deleting this function does not remove code --
+ * it substitutes an undefined-instruction trap.
  */
 void rockchip_stimer_init(void)
 {
-	u32 a;
-	int i;
-
-	if (!(readl(&STIMER->timer_ctrl_reg) & 1)) {
-		writel(0, &STIMER->timer_ctrl_reg);
-		writel(0xffffffff, &STIMER->timer_load_count0);
-		writel(0xffffffff, &STIMER->timer_load_count1);
-		writel(1, &STIMER->timer_ctrl_reg);
-	}
-
-	a = readl(&STIMER->timer_curr_value0);
-	for (i = 0; i < 100000; i++) {
-		if (readl(&STIMER->timer_curr_value0) != a) {
-			stimer_ticks = true;
-			return;
-		}
-	}
-	stimer_ticks = false;
 }
 
 /*
@@ -391,29 +354,16 @@ void board_init_f(ulong dummy)
 #endif
 
 	/*
-	 * 10: report what the liveness probe decided, rather than inferring the
-	 * timebase from how long a blink took. Two rates, both raw spins:
+	 * Step 10 is RETIRED (2026-07-31). It blinked at one of two rates to
+	 * report what the runtime liveness probe had decided about the counter at
+	 * CONFIG_ROCKCHIP_STIMER_BASE. That question is closed -- the counter
+	 * never advances, the probe was removed with the timer path, and there is
+	 * no longer a `stimer_ticks` to report. The answer is recorded in
+	 * docs/HARDWARE-CONSTANTS.md and in HOW-TO's step table.
 	 *
-	 *   fast flicker  the counter advances -- __udelay() uses the timer
-	 *   slow 1:1      it does not -- every delay is the uncalibrated spin
-	 *
-	 * If this says "slow", then TIMER_HZ never applied and the historic
-	 * "24 MHz / 64 = 375 kHz" was the fallback all along (docs/PENDING.md H1).
+	 * The number is deliberately not reused: step numbers appear in session
+	 * notes and card filenames, so recycling 10 would make old logs lie.
 	 */
-#ifdef UBOOT_CURRENT_STEP
-	if (UBOOT_CURRENT_STEP == 10) {
-		u32 period = stimer_ticks ? SPL_STEP_SPIN / 8
-					  : SPL_STEP_SPIN * 4;
-
-		spl_led_init();
-		while (1) {
-			spl_led(true);
-			spl_spin(period);
-			spl_led(false);
-			spl_spin(period);
-		}
-	}
-#endif
 
 	/* slow pulse = the mask ROM read the SD card and branched into our SPL */
 	spl_led_init();
