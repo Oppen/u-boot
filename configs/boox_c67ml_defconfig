@@ -204,6 +204,18 @@ CONFIG_CMD_MMC=y
 # at all -- clk_rk3026.c has no get_rate case for every id -- and CMD_GPIO shows
 # whether the sdmmc pads are still muxed, which matters because this port has no
 # Rockchip pinctrl driver and relies on whatever the BootROM left behind.
+# Boot timing, so boot-speed work has a NUMBER instead of an impression.
+#
+# This was off by accident, not by decision -- it has no default and nobody
+# enabled it. The SPL cpu_init_cp15 change (4f1d302f) was committed with
+# "did the boot feel quicker?" as its only success metric, which is not a
+# measurement. `bootstage report` gives per-stage timings; CMD_BOOTSTAGE also
+# un/stashes them.
+#
+# Upstream infrastructure, none of it ours. Costs a timestamp per checkpoint.
+CONFIG_BOOTSTAGE=y
+CONFIG_BOOTSTAGE_REPORT=y
+CONFIG_CMD_BOOTSTAGE=y
 CONFIG_CMD_CLK=y
 # `icache` / `dcache` -- read-outs, not inferences. Two things need them:
 #
