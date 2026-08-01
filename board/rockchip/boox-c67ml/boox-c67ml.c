@@ -325,9 +325,23 @@ void otg_phy_init(struct dwc2_udc *dev)
 #endif
 }
 
+/*
+ * PULSE the reset, do not park in it.
+ *
+ * This is reached from udc_disable() (dwc2_udc_otg.c:186), which is on the
+ * g_dnl_unregister() path -- so it now runs at every kernel handoff, not just
+ * on an explicit shutdown. Asserting SOFTRST_CON4 and leaving it asserted
+ * handed Linux USBOTG0 + USBPHY0 + OTGC0 held in reset, and touching a block
+ * in reset hangs this bus: observed 2026-07-31 as a dark LED with the U-Boot
+ * console correctly gone and no new gadget appearing.
+ *
+ * Same assert/release shape as otg_phy_init() above.
+ */
 void otg_phy_off(struct dwc2_udc *dev)
 {
 	writel(0x00e000e0, (void __iomem *)CRU_SOFTRST_CON4);
+	led_delay_spin_ms(3);
+	writel(0x00e00000, (void __iomem *)CRU_SOFTRST_CON4);
 }
 
 /*
@@ -346,8 +360,9 @@ void otg_phy_off(struct dwc2_udc *dev)
  * freed memory. bootm prints "Starting kernel ..." BEFORE calling us and prints
  * nothing after, so this is the last safe point (boot/bootm.c:1200-1219).
  *
- * otg_phy_off() is deliberately NOT called: it asserts SOFTRST_CON4 and never
- * deasserts, which would hand Linux a PHY held in reset.
+ * We do not call otg_phy_off() ourselves, but g_dnl_unregister() reaches it via
+ * udc_disable() (dwc2_udc_otg.c:186) -- which is why that function had to be
+ * fixed to release SOFTRST_CON4 instead of parking in it. See it below.
  */
 void board_quiesce_devices(void)
 {
