@@ -249,7 +249,7 @@ enum boox_stage {
  * pattern rather than stopping to perform it. Ratios, not rates, as before.
  */
 static struct cyclic_info boox_led_cyclic;
-static const struct led_rhythm *boox_cyclic_rhythm = &boox_rhythms[0];
+static const struct led_rhythm *boox_cyclic_rhythm;
 static unsigned int boox_cyclic_idx;
 
 /*
@@ -258,25 +258,52 @@ static unsigned int boox_cyclic_idx;
  * cyclic polices per-call cost via CYCLIC_MAX_CPU_TIME_US (5000 us here).
  */
 /*
- * Deliberately the SIMPLEST callback that can work: one toggle per tick, no
- * per-element timing, no statics. The question this card answers is only
- * "does cyclic execute at all" -- `cyclic list` reports the run count -- and a
- * flat 5 Hz square wave answers it visually too. Pattern fidelity comes back
- * once the mechanism is proven.
+ * Per-element timing from get_timer(), NOT from counting ticks.
+ *
+ * Measured on hardware: `cyclic list` reports 7.70 times/s against a requested
+ * 10, because cyclic only runs when schedule() is called and the main loop sets
+ * that cadence -- roughly 130 ms between entries. A callback that assumed each
+ * entry was one tick of a known length would drift by that ratio and jitter with
+ * whatever the loop is doing.
+ *
+ * The same measurement bounds what can be displayed: an element shorter than
+ * the cadence cannot render, so the cyclic patterns below use elements of
+ * >= 250 ms. They keep the qualitative signatures of the blocking rhythms --
+ * duty ratio, pulses per group, equal vs unequal pulses -- which is what makes
+ * a stage identifiable, rather than their exact millisecond values.
  */
-#define BOOX_TICK_MS	100
+#define BOOX_TICK_MS	50
+
+static const u16 cyc_mostly_off[] = {  250, 2000 };		/* 1:8   */
+static const u16 cyc_double_tap[] = {  250,  400, 250, 1600 };	/* tap tap  */
+static const u16 cyc_triple_tap[] = {  250,  400, 250, 400, 250, 1600 };
+static const u16 cyc_dash_dot[]   = { 1500,  500, 250, 1000 };	/* dash dot */
+
+static const struct led_rhythm boox_cyclic_rhythms[] = {
+	RHYTHM(cyc_mostly_off),		/* board_early_init_f */
+	RHYTHM(cyc_double_tap),		/* dram_init */
+	RHYTHM(cyc_triple_tap),		/* misc_init_r */
+	RHYTHM(cyc_dash_dot),		/* last_stage_init */
+};
 
 static void boox_led_tick(struct cyclic_info *c)
 {
+	const struct led_rhythm *r = boox_cyclic_rhythm;
+	static ulong due;
+
+	if (due && get_timer(0) < due)
+		return;
+
+	boox_cyclic_idx = (boox_cyclic_idx + 1) % r->n;
 	led_set(!(boox_cyclic_idx & 1));
-	boox_cyclic_idx++;
+	due = get_timer(0) + r->ms[boox_cyclic_idx];
 }
 
 static void boox_led_cyclic_start(void)
 {
 	static bool started;
 
-	if (started)
+	if (started || !boox_cyclic_rhythm)
 		return;
 	started = true;
 
@@ -297,7 +324,7 @@ static void led_stage(enum boox_stage stage, bool use_timer)
 	 * timebase exists yet: before relocation it does not, so the pattern is
 	 * recorded and the cyclic function starts at the first stage that has one.
 	 */
-	boox_cyclic_rhythm = &boox_rhythms[stage];
+	boox_cyclic_rhythm = &boox_cyclic_rhythms[stage];
 	boox_cyclic_idx = 0;
 
 	if (use_timer)
