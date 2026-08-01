@@ -497,8 +497,15 @@ int dram_init_banksize(void)
  * survive SPL -> BROM -> here and need no DRAM. MUST match GRF_OS_REG2..4 and
  * SPL_GT_STASH_MAGIC16 in arch/arm/mach-rockchip/rk3026/rk3026-board-spl.c.
  *
- * A DRAM stash at 0x60f00000 was tried first and the magic never arrived, for
- * reasons still unexplained -- see the comment in that file.
+ * A DRAM stash at 0x60f00000 was tried first and the magic never arrived. The
+ * reason is now known: that address is CONFIG_PRE_CON_BUF_ADDR, so the
+ * pre-console buffer overwrote the stash. It was never evidence that DRAM is
+ * unusable as a cross-stage carrier.
+ *
+ * ⚠️ OS_REG2..4 are OURS, and OS_REG0/1/5 belong to the DDR blob, the DRAM
+ * geometry word and the boot-mode register respectively. Only OS_REG6/7 are
+ * free. Anything else that wants cross-stage scratch must check that first: a
+ * later user picked OS_REG2..4 and silently read back this calibration.
  */
 #define GRF_OS_REG2		0x200081d0
 #define GRF_OS_REG3		0x200081d4
