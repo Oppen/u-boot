@@ -23,6 +23,7 @@
 #include <asm/arch-rockchip/sdram_rk3026.h>
 #include <asm/arch-rockchip/uart.h>
 #include <linux/delay.h>
+#include <u-boot/schedule.h>
 
 /*
  * Hard-coded rather than read from the device tree: the SPL budget is 6 KiB
@@ -485,7 +486,7 @@ static void send_command(struct rk3026_ddr_pctl *pctl,
 	writel((START_CMD | (rank << 20) | arg | cmd), &pctl->mcmd);
 	udelay(1);
 	while (readl(&pctl->mcmd) & START_CMD)
-		;
+		schedule();
 }
 
 static void memory_init(struct rk3026_sdram_priv *priv)
@@ -543,7 +544,7 @@ static void data_training(struct rk3026_sdram_priv *priv)
 	udelay(6);
 	while ((readl(&ddr_phy->ddrphy_reg62) & CAL_DONE_MASK) !=
 		(HIGH_8BIT_CAL_DONE | LOW_8BIT_CAL_DONE)) {
-		;
+		schedule();
 	}
 
 	clrsetbits_le32(&ddr_phy->ddrphy_reg2, 0x03,
@@ -573,7 +574,7 @@ static void move_to_config_state(struct rk3026_sdram_priv *priv)
 			writel(WAKEUP_STATE, &pctl->sctl);
 			while ((readl(&pctl->stat) & PCTL_STAT_MASK)
 				!= ACCESS)
-				;
+				schedule();
 			/*
 			 * If at low power state, need wakeup first, and then
 			 * enter the config, so fallthrough
@@ -583,7 +584,7 @@ static void move_to_config_state(struct rk3026_sdram_priv *priv)
 		case INIT_MEM:
 			writel(CFG_STATE, &pctl->sctl);
 			while ((readl(&pctl->stat) & PCTL_STAT_MASK) != CONFIG)
-				;
+				schedule();
 			break;
 		case CONFIG:
 			return;
@@ -604,17 +605,17 @@ static void move_to_access_state(struct rk3026_sdram_priv *priv)
 		case LOW_POWER:
 			writel(WAKEUP_STATE, &pctl->sctl);
 			while ((readl(&pctl->stat) & PCTL_STAT_MASK) != ACCESS)
-				;
+				schedule();
 			break;
 		case INIT_MEM:
 			writel(CFG_STATE, &pctl->sctl);
 			while ((readl(&pctl->stat) & PCTL_STAT_MASK) != CONFIG)
-				;
+				schedule();
 			/* fallthrough */
 		case CONFIG:
 			writel(GO_STATE, &pctl->sctl);
 			while ((readl(&pctl->stat) & PCTL_STAT_MASK) != ACCESS)
-				;
+				schedule();
 			break;
 		case ACCESS:
 			return;
@@ -817,7 +818,7 @@ void sdram_init(void)
 	phy_cfg(&sdram_priv);
 	writel(POWER_UP_START, &sdram_priv.pctl->powctl);
 	while (!(readl(&sdram_priv.pctl->powstat) & POWER_UP_DONE))
-		;
+		schedule();
 	memory_init(&sdram_priv);
 	move_to_config_state(&sdram_priv);
 	/* Blob order: DQS calibration runs in ACCESS state, not CONFIG. */

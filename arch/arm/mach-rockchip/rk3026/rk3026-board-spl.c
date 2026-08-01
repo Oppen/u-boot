@@ -27,6 +27,7 @@
 #include <asm/arch-rockchip/hardware.h>
 #include <asm/arch-rockchip/sdram_rk3026.h>
 #include <asm/arch-rockchip/timer.h>
+#include <cyclic.h>
 #include <spl.h>
 
 /*
@@ -323,6 +324,28 @@ static void spl_led(bool on)
 }
 
 /*
+ * SPL heartbeat, so a hang has a signature instead of a frozen LED.
+ *
+ * The level scheme (off = entered, on = DRAM trained) cannot distinguish "stuck
+ * in a DDR poll" from "dead": both leave the LED off. With cyclic driving a
+ * blink, a hang inside sdram_init() keeps blinking -- the polls call schedule()
+ * for exactly this -- while a hang anywhere without schedule() freezes it.
+ *
+ * Cheap by construction: the struct is caller-allocated, so registering needs no
+ * malloc, which is what makes this possible in a 6144 B SPL with no heap.
+ */
+static struct cyclic_info spl_led_cyclic;
+
+static void spl_led_tick(struct cyclic_info *c)
+{
+	static bool on;
+
+	on = !on;
+	spl_led(on);
+}
+
+
+/*
  * Rhythms, not counts. Each milestone gets a shape recognisable at a glance: a
  * count has to be watched from its start and tallied, and adjacent counts look
  * alike -- which matters most here, where the milestones are "the ROM read the
@@ -570,6 +593,10 @@ void board_init_f(ulong dummy)
 	 */
 	spl_led_init();
 	spl_led(false);
+
+	/* 100 ms: the SPL is milliseconds long when healthy, so this normally
+	 * ticks once or twice. It earns its place when something hangs. */
+	cyclic_register(&spl_led_cyclic, spl_led_tick, 100000, "spl-led");
 	if (BOOX_LED_PROGRESS)
 		spl_led_rhythm(spl_rhy_slow, ARRAY_SIZE(spl_rhy_slow));
 

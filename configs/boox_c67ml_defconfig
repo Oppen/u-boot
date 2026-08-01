@@ -129,6 +129,17 @@ CONFIG_BOARD_EARLY_INIT_F=y
 CONFIG_LAST_STAGE_INIT=y
 # Non-blocking LED heartbeat instead of blocking dwells; see boox-c67ml.c.
 CONFIG_CYCLIC=y
+# Cyclic in the SPL too. Its help names LED blinking as the example use, and it
+# needs exactly what now exists: get_timer_us() from the framework timebase, and
+# something calling schedule() -- udelay() does (lib/time.c:212), and the DDR
+# poll loops in sdram_rk3026.c were given schedule() so a hang inside one keeps
+# the LED moving instead of freezing it.
+# scripts/Makefile.xpl:121 only descends into common/ for the SPL under
+# LIBCOMMON_SUPPORT, and cyclic.o lives there. console.o is separately gated on
+# SPL_SERIAL (common/Makefile:76), which stays off, so this does not drag the
+# printf/serial chain back in.
+CONFIG_SPL_LIBCOMMON_SUPPORT=y
+CONFIG_SPL_CYCLIC=y
 CONFIG_MISC_INIT_R=y
 # Back-to-BROM SPL: the mask ROM (not the SPL) loads U-Boot proper, so the SPL
 # only inits UART+timer, trains DRAM, and returns. It never calls spl_init().
@@ -176,7 +187,11 @@ CONFIG_DM_I2C=y
 CONFIG_SYS_I2C_ROCKCHIP=y
 CONFIG_PINCTRL=y
 # CONFIG_DM_REGULATOR is not set
-# CONFIG_SPL_DM_SERIAL is not set
+# DM serial provides default_serial_console; the legacy core (drivers/serial/
+# serial.c) does not, and common/stdio.o -- unconditional in common/, which
+# LIBCOMMON pulls in for cyclic.o -- references it. So this is the cost of
+# SPL_CYCLIC, not a console: UART2 is still unsoldered.
+CONFIG_SPL_DM_SERIAL=y
 CONFIG_DEBUG_UART_SHIFT=2
 CONFIG_DEBUG_UART_ANNOUNCE=y
 CONFIG_SYS_NS16550_MEM32=y
