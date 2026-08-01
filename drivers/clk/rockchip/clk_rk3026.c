@@ -434,6 +434,30 @@ static ulong rk3026_clk_get_rate(struct clk *clk)
 	 * silently run the timebase at the APB rate instead of xin24m's 24 MHz.
 	 * See docs/PORT-FIXES.md §3b.
 	 */
+	/*
+	 * CORE_ACLK / CORE_PERI divide core_pre, which is the selected core PLL
+	 * (APLL here), free divider /(n+1) -- see the divider-semantics table in
+	 * cru_rk3026.h. Referenced by rk3026.dtsi timer@1013c200 and
+	 * timer@1013c600, whose clk_get fails without these.
+	 *
+	 * CORE_PERI IS the A9 PERIPHCLK, so the rk3026.dtsi reference from
+	 * timer@1013c200 is correct and arm_global_timer can be bound to it.
+	 *
+	 * VERIFIED 2026-08-01 at the prompt, timed by the device rather than by
+	 * hand (`md.l 0x1013c200 2; sleep 30; md.l 0x1013c200 2` on one line):
+	 * 3,000,415,533 ticks in 30 s = 100.0139 MHz, against CLKSEL_CON1 =
+	 * 0x00001015 -> CORE_PERI_DIV 5 -> APLL/6 = 100.000 MHz. 0.014% apart.
+	 *
+	 * An earlier revision of this comment claimed PERIPHCLK was hardwired
+	 * CPU/4 and that the DTS was wrong. That was three coincidences: the
+	 * divider was 4 under Android (912/4 = 228.3), 4 at BROM defaults in the
+	 * SPL (24/4 = 6.0), and is 6 now. Each reading fitted CPU/4 because the
+	 * divider happened to be 4, not because the ratio is fixed.
+	 */
+	case CORE_PERI:
+		return DIV_TO_RATE(rkclk_pll_get_rate(priv->cru, CLK_ARM),
+				   (readl(&priv->cru->cru_clksel_con[1]) &
+				    CORE_PERI_DIV_MASK) >> CORE_PERI_DIV_SHIFT);
 	case ACLK_PERI:
 	case HCLK_PERI:
 	case PCLK_PERI:
