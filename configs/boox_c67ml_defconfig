@@ -129,25 +129,51 @@ CONFIG_BOARD_EARLY_INIT_F=y
 CONFIG_LAST_STAGE_INIT=y
 CONFIG_MISC_INIT_R=y
 # Back-to-BROM SPL: the mask ROM (not the SPL) loads U-Boot proper, so the SPL
-# only inits UART+timer, trains DRAM, and returns. It never calls spl_init().
+# trains DRAM and returns; it does not call spl_init().
 #
-# The SPL is therefore DM-INERT, not DM-free -- CONFIG_SPL_DM is =y regardless of
-# what any defconfig line says. MEASURED 2026-07-29, in case anyone reasons about
-# this again instead of building it:
+# WE WANT DM IN THE SPL. The clock driver is the reason: the SPL runs at 24 MHz
+# because nothing raises the PLLs there (measured -- A9 global timer at 6 MHz =
+# CPU/4, docs/HARDWARE-CONSTANTS.md), while U-Boot proper reaches 600 MHz from
+# the CRU probe. Programming them via the same driver, in the SPL, is the fix,
+# and duplicating rkclk_init() into a header instead is not acceptable.
 #
-#   baseline SPL                                              3872 B
-#   + SPL_TIMER + SPL_SYS_MALLOC_SIMPLE                       4240 B  (links)
-#   + SPL_FRAMEWORK + SPL_SYS_MALLOC_F + SPL_LIBCOMMON_SUPPORT
-#     + SPL_OF_CONTROL + SPL_TIMER + SPL_DM_SERIAL           13532 B
-#
-# against a 6144 B SRAM window. So a real DT+DM SPL is not blocked by a missing
-# symbol -- it links, with DM and fdtdec genuinely in the binary -- it is blocked
-# by being 2.2x too big. Next thing to measure is SPL_OF_PLATDATA, which drops
-# fdtdec and the embedded DT. The link prerequisites, if you retry it:
-# SPL_SYS_MALLOC_F depends on SPL_FRAMEWORK; malloc_simple.o (which has calloc)
-# lives in common/ and needs SPL_LIBCOMMON_SUPPORT; the legacy serial core needs
-# default_serial_console unless SPL_DM_SERIAL is on.
+# Link prerequisites, learned the hard way: SPL_SYS_MALLOC_F depends on
+# SPL_FRAMEWORK; malloc_simple.o (which has calloc) lives in common/ and needs
+# SPL_LIBCOMMON_SUPPORT; the legacy serial core needs default_serial_console
+# unless SPL_DM_SERIAL is on. spl_early_init() is inside SPL_FRAMEWORK, so with
+# the framework off the SPL calls dm_init_and_scan() directly.
+# Restoring a negation I deleted by accident: SPL_FRAMEWORK is `default y`
+# (common/spl/Kconfig:24), so removing the line turned it ON and pulled spl.c,
+# puts() and a malloc pool into the SPL.
 # CONFIG_SPL_FRAMEWORK is not set
+# OF_PLATDATA_RT exists only "for systems running SPL from read-only memory"
+# (dts/Kconfig:505). Ours runs from writable SRAM. With it on, dm_setup_inst()
+# (drivers/core/root.c:58) calloc()s a copy of the priv data and references
+# __priv_data_start/__priv_data_end -- symbols defined ONLY in
+# arch/sandbox/cpu/u-boot-spl.lds, never in the ARM one. That is what made DM in
+# the SPL look like it needed a malloc pool and a framework.
+# CONFIG_SPL_OF_PLATDATA_RT is not set
+# No console in the SPL: UART2 is unsoldered and the LED is the only signal.
+#
+# SPL_SERIAL is the ONE switch that matters. It is prompted, so it can be
+# negated, and it select's SPL_PRINTF and SPL_STRTO (common/spl/Kconfig:1516).
+# SPL_PRINTF in turn is a NON-PROMPTED bool (lib/Kconfig:161) that select's
+# SPL_SPRINTF -- so negating SPL_PRINTF/SPL_SPRINTF/SPL_STRTO in a defconfig is
+# silently ignored, which is exactly what happened when it was tried.
+#
+# Measured cost of the chain this removes: ns16550 610 B + tiny-printf 574 B +
+# console 104 B + serial-uclass 96 B.
+# CONFIG_SPL_SERIAL is not set
+# Nothing block-related runs in the SPL -- the mask ROM loads U-Boot proper, we
+# never read a card there. SPL_BLK cannot be negated directly: SPL_DM_MMC
+# (prompted, default y, depends on SPL_DM && DM_MMC) select's it
+# (drivers/mmc/Kconfig:57). Negate the selector instead. Worth 288 B.
+# CONFIG_SPL_DM_MMC is not set
+# CONFIG_SPL_LIBCOMMON_SUPPORT is not set
+CONFIG_SPL_CLK=y
+CONFIG_SPL_OF_CONTROL=y
+CONFIG_SPL_OF_PLATDATA=y
+CONFIG_SPL_OF_PLATDATA_INST=y
 CONFIG_SPL_NO_BSS_LIMIT=y
 CONFIG_SPL_HAVE_INIT_STACK=y
 # CONFIG_SPL_DOS_PARTITION is not set

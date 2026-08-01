@@ -18,24 +18,36 @@
 };
 
 &grf {
-	bootph-all;
+	/* Not in the SPL phase set: there is no rk3026 grf syscon driver in the
+	 * tree (other SoCs ship syscon_rk3288.c and friends), and
+	 * OF_PLATDATA_INST requires a driver for every SPL-phase node. */
+	bootph-some-ram;
 };
 
 &xin24m {
-	bootph-all;
+	/* Not in the SPL phase set: clk_fixed_rate in this tree has no
+	 * OF_PLATDATA dtplat member, so dtoc cannot instantiate it, and the SPL
+	 * does not need it -- rkclk_init() only writes CRU registers. */
+	bootph-some-ram;
 };
 
 &uart2 {
-	bootph-all;
+	/* U-Boot proper pre-reloc only: OF_PLATDATA_INST needs an SPL driver
+	 * for every SPL-phase node, and this one has none there. */
+	bootph-some-ram;
 	clock-frequency = <24000000>;
 };
 
 &emmc {
-	bootph-all;
+	/* U-Boot proper pre-reloc only: OF_PLATDATA_INST needs an SPL driver
+	 * for every SPL-phase node, and this one has none there. */
+	bootph-some-ram;
 };
 
 &sdmmc {
-	bootph-all;
+	/* U-Boot proper pre-reloc only: OF_PLATDATA_INST needs an SPL driver
+	 * for every SPL-phase node, and this one has none there. */
+	bootph-some-ram;
 	/* fifo-mode is set in the canonical board dts (dts/), not here --
 	 * it applies to the kernel build too, so it belongs in one place.
 	 * See that file's &sdmmc node for the measurement it's based on. */

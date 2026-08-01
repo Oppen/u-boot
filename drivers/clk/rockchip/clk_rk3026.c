@@ -12,6 +12,7 @@
 #include <clk-uclass.h>
 #include <boox_probe.h>
 #include <dm.h>
+#include <dt-structs.h>
 #include <errno.h>
 #include <log.h>
 #include <malloc.h>
@@ -223,6 +224,16 @@ static void rkclk_init(struct rk3026_cru *cru)
 }
 
 /* Get pll rate by id */
+/*
+ * DM clock OPS -- U-Boot proper only.
+ *
+ * The SPL calls exactly one thing in this driver: rkclk_init(), from the probe.
+ * It never asks for a rate and never gates a clock, so the rate getters, the
+ * mmc divider maths and the 40-entry gate table are dead weight in a 6144 B
+ * SRAM window. Measured: this file is 1233 B of the SPL, the largest item after
+ * DDR init.
+ */
+#if !defined(CONFIG_XPL_BUILD)
 static uint32_t rkclk_pll_get_rate(struct rk3026_cru *cru,
 				   enum rk_clk_id clk_id)
 {
@@ -618,12 +629,32 @@ static struct clk_ops rk3026_clk_ops = {
 	.enable		= rk3026_clk_enable,
 	.disable	= rk3026_clk_disable,
 };
+#endif /* !CONFIG_XPL_BUILD */
+
+/*
+ * The SPL builds this driver with OF_PLATDATA, where there is no live device
+ * tree to read: dtoc turns the cru node into a dtd_ struct at build time. Same
+ * driver, same rkclk_init(), two ways in.
+ */
+#if CONFIG_IS_ENABLED(OF_PLATDATA)
+struct rk3026_clk_plat {
+	struct dtd_rockchip_rk3026_cru dtd;
+};
+#endif
 
 static int rk3026_clk_of_to_plat(struct udevice *dev)
 {
 	struct rk3026_clk_priv *priv = dev_get_priv(dev);
 
-	priv->cru = dev_read_addr_ptr(dev);
+	if (CONFIG_IS_ENABLED(OF_REAL)) {
+		priv->cru = dev_read_addr_ptr(dev);
+	} else {
+#if CONFIG_IS_ENABLED(OF_PLATDATA)
+		struct rk3026_clk_plat *plat = dev_get_plat(dev);
+
+		priv->cru = (struct rk3026_cru *)(uintptr_t)plat->dtd.reg[0];
+#endif
+	}
 
 	return 0;
 }
@@ -640,6 +671,16 @@ static int rk3026_clk_probe(struct udevice *dev)
 	return 0;
 }
 
+/*
+ * Runtime binding is unavailable in the SPL and unnecessary there.
+ *
+ * SPL_OF_PLATDATA_INST declares udevices at build time and its companion
+ * SPL_OF_PLATDATA_NO_BIND (default y) removes the run-time bind path entirely --
+ * which is what lets the SPL have DM without SPL_FRAMEWORK, SPL_SYS_MALLOC_F or
+ * a malloc pool. This function's children (sysreset, and the reset controller)
+ * belong to U-Boot proper; the SPL only needs rkclk_init() from the probe.
+ */
+#if !defined(CONFIG_XPL_BUILD)
 static int rk3026_clk_bind(struct udevice *dev)
 {
 	int ret;
@@ -669,6 +710,7 @@ static int rk3026_clk_bind(struct udevice *dev)
 
 	return 0;
 }
+#endif /* !CONFIG_XPL_BUILD */
 
 static const struct udevice_id rk3026_clk_ids[] = {
 	{ .compatible = "rockchip,rk3026-cru" },
@@ -681,7 +723,11 @@ U_BOOT_DRIVER(rockchip_rk3026_cru) = {
 	.of_match	= rk3026_clk_ids,
 	.priv_auto	= sizeof(struct rk3026_clk_priv),
 	.of_to_plat	= rk3026_clk_of_to_plat,
+#if !defined(CONFIG_XPL_BUILD)
 	.ops		= &rk3026_clk_ops,
+#endif
+#if !defined(CONFIG_XPL_BUILD)
 	.bind		= rk3026_clk_bind,
+#endif
 	.probe		= rk3026_clk_probe,
 };
