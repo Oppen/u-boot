@@ -127,6 +127,8 @@ CONFIG_CONSOLE_MUX=y
 # (board_late_init is taken by mach-rockchip/board.c).
 CONFIG_BOARD_EARLY_INIT_F=y
 CONFIG_LAST_STAGE_INIT=y
+# Non-blocking LED heartbeat instead of blocking dwells; see boox-c67ml.c.
+CONFIG_CYCLIC=y
 CONFIG_MISC_INIT_R=y
 # Back-to-BROM SPL: the mask ROM (not the SPL) loads U-Boot proper, so the SPL
 # only inits UART+timer, trains DRAM, and returns. It never calls spl_init().

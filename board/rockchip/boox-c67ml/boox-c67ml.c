@@ -25,6 +25,7 @@
 #include <asm/global_data.h>
 #include <asm/io.h>
 #include <boox_probe.h>
+#include <cyclic.h>
 #include <linux/bitops.h>
 #include <linux/delay.h>
 
@@ -218,16 +219,89 @@ enum boox_stage {
  * time. led_rhythm_forever() for the terminal stage is deliberately NOT gated:
  * it is the result, not progress reporting.
  */
-#if defined(UBOOT_CURRENT_STEP) || defined(BOOX_NO_LED_PROGRESS)
+#if defined(UBOOT_CURRENT_STEP) || defined(BOOX_LED_PROGRESS_ON)
 #define BOOX_LED_PROGRESS	0
 #else
-#define BOOX_LED_PROGRESS	1
+/*
+ * OFF by default since 2026-08-01. The chain is trusted and there IS a console
+ * now, so these dwells are pure cost: LED_DWELL_MS is 6000 and there are four
+ * of them (board_early_init_f, dram_init, misc_init_r, last_stage), i.e. ~24
+ * SECONDS of boot spent blinking. They became exact rather than merely slow
+ * once the timebase started working, because led_rhythm_run() uses mdelay().
+ *
+ * Turn them back on with -DBOOX_LED_PROGRESS_ON when there is no console --
+ * step builds still force them off, since a step image must not depend on a
+ * delay primitive.
+ */
+#define BOOX_LED_PROGRESS	0
 #endif
+
+/*
+ * Non-blocking heartbeat.
+ *
+ * This is what the four 6-second dwells should always have been. They blocked
+ * because there was no cyclic infrastructure running -- which needed a live
+ * get_timer_us(), which needed the timebase. All three exist now, so the LED
+ * can carry the same stage information continuously while the boot proceeds,
+ * at a cost of one toggle every few hundred ms instead of ~24 seconds of boot.
+ *
+ * The stage is a variable the callback reads, so each milestone changes the
+ * pattern rather than stopping to perform it. Ratios, not rates, as before.
+ */
+static struct cyclic_info boox_led_cyclic;
+static const struct led_rhythm *boox_cyclic_rhythm = &boox_rhythms[0];
+static unsigned int boox_cyclic_idx;
+
+/*
+ * Tick granularity. The shortest element in any rhythm is 90 ms, so 10 ms
+ * resolves every pattern with room to spare and keeps the callback trivial --
+ * cyclic polices per-call cost via CYCLIC_MAX_CPU_TIME_US (5000 us here).
+ */
+/*
+ * Deliberately the SIMPLEST callback that can work: one toggle per tick, no
+ * per-element timing, no statics. The question this card answers is only
+ * "does cyclic execute at all" -- `cyclic list` reports the run count -- and a
+ * flat 5 Hz square wave answers it visually too. Pattern fidelity comes back
+ * once the mechanism is proven.
+ */
+#define BOOX_TICK_MS	100
+
+static void boox_led_tick(struct cyclic_info *c)
+{
+	led_set(!(boox_cyclic_idx & 1));
+	boox_cyclic_idx++;
+}
+
+static void boox_led_cyclic_start(void)
+{
+	static bool started;
+
+	if (started)
+		return;
+	started = true;
+
+	cyclic_register(&boox_led_cyclic, boox_led_tick,
+			BOOX_TICK_MS * 1000, "boox-led");
+}
 
 static void led_stage(enum boox_stage stage, bool use_timer)
 {
-	if (BOOX_LED_PROGRESS)
+	/* Blocking dwell: only for step builds, or when explicitly asked for. */
+	if (BOOX_LED_PROGRESS) {
 		led_rhythm_run(&boox_rhythms[stage], use_timer);
+		return;
+	}
+
+	/*
+	 * Otherwise just retarget the heartbeat. use_timer tells us whether a
+	 * timebase exists yet: before relocation it does not, so the pattern is
+	 * recorded and the cyclic function starts at the first stage that has one.
+	 */
+	boox_cyclic_rhythm = &boox_rhythms[stage];
+	boox_cyclic_idx = 0;
+
+	if (use_timer)
+		boox_led_cyclic_start();
 }
 
 #ifdef CONFIG_BOARD_EARLY_INIT_F

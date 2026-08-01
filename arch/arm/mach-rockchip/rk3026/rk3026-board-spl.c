@@ -382,10 +382,21 @@ static void spl_led(bool on)
  * one-line change. Step builds (T2) never run them: a step image must not
  * depend on __udelay() at all, which is the point of having steps.
  */
-#if defined(UBOOT_CURRENT_STEP) || defined(BOOX_NO_LED_PROGRESS)
+#if defined(UBOOT_CURRENT_STEP) || defined(BOOX_LED_PROGRESS_ON)
 #define BOOX_LED_PROGRESS	0
 #else
-#define BOOX_LED_PROGRESS	1
+/*
+ * OFF by default since 2026-08-01. The chain is trusted and there IS a console
+ * now, so these dwells are pure cost: LED_DWELL_MS is 6000 and there are four
+ * of them (board_early_init_f, dram_init, misc_init_r, last_stage), i.e. ~24
+ * SECONDS of boot spent blinking. They became exact rather than merely slow
+ * once the timebase started working, because led_rhythm_run() uses mdelay().
+ *
+ * Turn them back on with -DBOOX_LED_PROGRESS_ON when there is no console --
+ * step builds still force them off, since a step image must not depend on a
+ * delay primitive.
+ */
+#define BOOX_LED_PROGRESS	0
 #endif
 
 static const u16 spl_rhy_slow[] = { 100, 100 };
@@ -584,12 +595,25 @@ void board_init_f(ulong dummy)
 	 * notes and card filenames, so recycling 10 would make old logs lie.
 	 */
 
-	/* slow pulse = the mask ROM read the SD card and branched into our SPL */
+	/*
+	 * LEVEL, not rhythm: two register writes, no delays, so this survives the
+	 * dwells being switched off. It is the signal that has actually been used:
+	 *
+	 *   goes off        the mask ROM branched into our SPL
+	 *   comes back on   sdram_init() returned, DRAM is trained
+	 *   off and stays   sdram_init() did not return
+	 *
+	 * "Off" is positive proof, since the line is high out of a warm reset and
+	 * nothing else on the board clears it.
+	 */
 	spl_led_init();
+	spl_led(false);
 	if (BOOX_LED_PROGRESS)
 		spl_led_rhythm(spl_rhy_slow, ARRAY_SIZE(spl_rhy_slow));
 
 	sdram_init();
+
+	spl_led(true);
 
 	/* 4: sdram_init() returned. */
 	BOOX_STEP(4);
