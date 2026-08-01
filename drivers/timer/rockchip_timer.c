@@ -30,11 +30,25 @@ struct rockchip_timer_priv {
 
 static inline int64_t rockchip_timer_get_curr_value(struct rk_timer *timer)
 {
-	uint64_t timebase_h, timebase_l;
+	uint64_t timebase_h, timebase_l, again;
 	uint64_t cntr;
 
-	timebase_l = readl(&timer->timer_curr_value0);
-	timebase_h = readl(&timer->timer_curr_value1);
+	/*
+	 * Read high, low, high again: the two halves cannot be sampled
+	 * atomically, and these timers count DOWN, so if the low word wraps
+	 * between the reads the composed value is off by exactly 2^32 ticks.
+	 *
+	 * MEASURED on RK3026 (24 MHz timer): that is 178.96 s, and it showed up
+	 * as a cyclic function being unregistered with
+	 * "took too long: -178956968us vs 5000us max" -- once per low-word wrap,
+	 * i.e. every ~3 minutes of uptime. Every get_timer() consumer is exposed
+	 * to the same glitch; cyclic just happens to check.
+	 */
+	do {
+		timebase_h = readl(&timer->timer_curr_value1);
+		timebase_l = readl(&timer->timer_curr_value0);
+		again = readl(&timer->timer_curr_value1);
+	} while (again != timebase_h);
 
 	cntr = timebase_h << 32 | timebase_l;
 	return cntr;
