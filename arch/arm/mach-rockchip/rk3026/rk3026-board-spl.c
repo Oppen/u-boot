@@ -121,8 +121,59 @@
 #define A9_GT_CONTROL		(A9_PERIPHBASE + 0x208)
 #define A9_GT_CTRL_ENABLE	BIT(0)
 
-/* CPU 192 MHz / 4. See the rate discussion above: high errs long, which is safe. */
+/*
+ * Fallback only, used if the measurement below fails: CPU 192 MHz / 4. High errs
+ * long, which is the safe direction.
+ */
 #define SPL_GT_TICKS_PER_US	48
+
+/*
+ * Reference clock for calibrating the global timer: timer0, which runs off
+ * xin24m at a fixed 24 MHz and does NOT move with the PLLs -- unlike the global
+ * timer, whose rate is PERIPHCLK = CPU/4. It counts DOWN, and it is proven to
+ * count in the SPL once ungated (device tier, 2026-07-29).
+ *
+ * Register layout from the MiniLoader's own recipe: load0 +0x00, load1 +0x04,
+ * current value +0x08, control +0x10.
+ */
+#define TIMER0_BASE		0x20044000
+#define TIMER0_LOAD0		(TIMER0_BASE + 0x00)
+#define TIMER0_LOAD1		(TIMER0_BASE + 0x04)
+#define TIMER0_CURR		(TIMER0_BASE + 0x08)
+#define TIMER0_CTRL		(TIMER0_BASE + 0x10)
+#define TIMER0_REF_MHZ		24
+
+#define CRU_CLKGATE_CON1	0x200000d4
+#define CRU_CLKGATE_CON7	0x200000ec
+#define GATE_TIMER0_CON1_BIT	0
+#define GATE_TIMER0_CON7_BIT	7
+
+/* Plausibility window for the result, so a bad measurement cannot be believed. */
+#define SPL_GT_MHZ_MIN		1
+#define SPL_GT_MHZ_MAX		300
+
+/*
+ * Stashed for reporting at the U-Boot prompt, in GRF scratch registers rather
+ * than in DRAM.
+ *
+ * GRF_OS_REG0..5 (0x200081c8..0x200081dc) are Rockchip's cross-stage scratch
+ * words -- the vendor DDR blob parks capability info in the low ones and
+ * OS_REG5 is the boot-mode register, so 2/3/4 are free. They need no DRAM, no
+ * relocation-safe address, and they survive SPL -> BROM -> U-Boot proper.
+ * (GRF *is* cleared by U-Boot's own `reset`, which does not happen in between.)
+ *
+ * The first attempt used DRAM at 0x60f00000 and the magic never arrived, even
+ * though nothing in U-Boot's layout reaches there: its stack grows down from
+ * SYS_INIT_SP_ADDR 0x60100000, the image ends near 0x6004b800, and relocation
+ * goes to the top of RAM. So that failure is unexplained, and one candidate is
+ * that DRAM at base+15 MB does not hold -- read-back across the full 512 MiB
+ * (step 12) has never been run. Do not read the working stash below as evidence
+ * either way.
+ */
+#define GRF_OS_REG2		0x200081d0
+#define GRF_OS_REG3		0x200081d4
+#define GRF_OS_REG4		0x200081d8
+#define SPL_GT_STASH_MAGIC16	0x6774		/* "gt" */
 
 /*
  * Deliberately generous, where slow beats hung. Used only when the global timer
@@ -177,10 +228,63 @@ void __udelay(unsigned long usec)
  * debug_uart_init() and before sdram_init(), so it is in place for every delay
  * DDR training takes.
  */
+/*
+ * Measure the global timer against timer0, and keep the numbers.
+ *
+ * Both counters are sampled across the same raw spin, so the spin's own rate --
+ * which is exactly what nobody can pin down here -- cancels out. timer0 is
+ * xin24m at a fixed 24 MHz, so GT_MHz = 24 * dgt / dt0.
+ *
+ * dgt/dt0 rather than a stopwatch is the whole point: it needs no host, no
+ * console and no assumption about the CPU clock, which is the open question the
+ * 48-ticks/us constant was papering over.
+ */
+static u32 spl_gt_dgt, spl_gt_dt0;
+
+static u32 spl_gt_measure_mhz(void)
+{
+	volatile u32 i;
+	u32 g0, g1, t0, t1, mhz;
+
+	/* Ungate timer0 before touching it: reading a gated block hangs this bus. */
+	writel(BIT(GATE_TIMER0_CON1_BIT + 16), (void __iomem *)CRU_CLKGATE_CON1);
+	writel(BIT(GATE_TIMER0_CON7_BIT + 16), (void __iomem *)CRU_CLKGATE_CON7);
+
+	/* Free-running, full range. MiniLoader's sequence. */
+	writel(0, (void __iomem *)TIMER0_CTRL);
+	writel(0xffffffff, (void __iomem *)TIMER0_LOAD0);
+	writel(0xffffffff, (void __iomem *)TIMER0_LOAD1);
+	writel(1, (void __iomem *)TIMER0_CTRL);
+
+	g0 = readl((void __iomem *)A9_GT_COUNTER_LO);
+	t0 = readl((void __iomem *)TIMER0_CURR);
+	for (i = 0; i < 20000; i++)
+		;
+	g1 = readl((void __iomem *)A9_GT_COUNTER_LO);
+	t1 = readl((void __iomem *)TIMER0_CURR);
+
+	spl_gt_dgt = g1 - g0;		/* counts up */
+	spl_gt_dt0 = t0 - t1;		/* counts down */
+
+	if (!spl_gt_dgt || !spl_gt_dt0)
+		return 0;
+
+	/*
+	 * 24 * dgt stays inside u32 while dgt < ~178M, i.e. several seconds of a
+	 * 48 MHz counter; the spin above is a fraction of a second.
+	 */
+	mhz = (TIMER0_REF_MHZ * spl_gt_dgt + spl_gt_dt0 / 2) / spl_gt_dt0;
+
+	if (mhz < SPL_GT_MHZ_MIN || mhz > SPL_GT_MHZ_MAX)
+		return 0;
+
+	return mhz;
+}
+
 void rockchip_stimer_init(void)
 {
 	volatile u32 i;
-	u32 a, b;
+	u32 a, b, mhz;
 
 	writel(A9_GT_CTRL_ENABLE, (void __iomem *)A9_GT_CONTROL);
 
@@ -189,8 +293,26 @@ void rockchip_stimer_init(void)
 		;
 	b = readl((void __iomem *)A9_GT_COUNTER_LO);
 
-	if (b != a)
-		spl_gt_ticks_per_us = SPL_GT_TICKS_PER_US;
+	if (b == a)
+		return;			/* not advancing: leave the spin path selected */
+
+	mhz = spl_gt_measure_mhz();
+
+	/* ticks per us IS the rate in MHz. Fall back high, which errs long. */
+	spl_gt_ticks_per_us = mhz ? mhz : SPL_GT_TICKS_PER_US;
+}
+
+/*
+ * Hand the measurement to U-Boot proper, which has the console. GRF, not DRAM,
+ * so this no longer has to wait for sdram_init() -- and no longer depends on
+ * DRAM being sound at the address used.
+ */
+void spl_gt_stash(void)
+{
+	writel((SPL_GT_STASH_MAGIC16 << 16) | (spl_gt_ticks_per_us & 0xffff),
+	       (void __iomem *)GRF_OS_REG2);
+	writel(spl_gt_dgt, (void __iomem *)GRF_OS_REG3);
+	writel(spl_gt_dt0, (void __iomem *)GRF_OS_REG4);
 }
 
 /*
@@ -439,6 +561,9 @@ void board_init_f(ulong dummy)
 	BOOX_STEP(2);
 
 	rockchip_stimer_init();
+
+	/* GRF scratch, so this needs no DRAM and survives a failed sdram_init(). */
+	spl_gt_stash();
 
 	/* 3: the timer block answered and the liveness probe finished. */
 	BOOX_STEP(3);

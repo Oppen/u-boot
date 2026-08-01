@@ -391,10 +391,48 @@ int dram_init_banksize(void)
 }
 
 #ifdef CONFIG_MISC_INIT_R
+/*
+ * Where the SPL left its global-timer calibration: GRF scratch registers, which
+ * survive SPL -> BROM -> here and need no DRAM. MUST match GRF_OS_REG2..4 and
+ * SPL_GT_STASH_MAGIC16 in arch/arm/mach-rockchip/rk3026/rk3026-board-spl.c.
+ *
+ * A DRAM stash at 0x60f00000 was tried first and the magic never arrived, for
+ * reasons still unexplained -- see the comment in that file.
+ */
+#define GRF_OS_REG2		0x200081d0
+#define GRF_OS_REG3		0x200081d4
+#define GRF_OS_REG4		0x200081d8
+#define SPL_GT_STASH_MAGIC16	0x6774		/* "gt" */
+
+/*
+ * Print what the SPL measured. The SPL has no console, and its rate was until
+ * now an assumed constant (CPU 192 MHz / 4) with the real CPU clock in that
+ * window unresolved -- so this is the readout that turns it into a measurement.
+ *
+ * dgt/dt0 are the raw deltas over one spin: timer0 is xin24m at a fixed 24 MHz
+ * and does not move with the PLLs, so MHz = 24 * dgt / dt0 and the spin's own
+ * rate cancels.
+ */
+static void boox_report_spl_timer(void)
+{
+	u32 w = readl((void __iomem *)GRF_OS_REG2);
+
+	if ((w >> 16) != SPL_GT_STASH_MAGIC16) {
+		printf("SPL timer: no calibration stashed (OS_REG2 %08x)\n", w);
+		return;
+	}
+
+	printf("SPL timer: A9 global timer %u ticks/us; dgt %u / dt0 %u (ref 24 MHz)\n",
+	       w & 0xffff, readl((void __iomem *)GRF_OS_REG3),
+	       readl((void __iomem *)GRF_OS_REG4));
+}
+
 int misc_init_r(void)
 {
 	/* 8: relocation and the driver model survived. */
 	BOOX_STEP_R(8);
+
+	boox_report_spl_timer();
 
 	/*
 	 * 78: is the timebase alive AFTER relocation? Everything in dwc2 bounds
