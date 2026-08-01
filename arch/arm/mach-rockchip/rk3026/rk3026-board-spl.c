@@ -30,9 +30,11 @@
 #include <spl.h>
 
 /*
- * Delays. Spin only -- the hardware timer path was REMOVED 2026-07-31.
+ * Delay history, kept because each entry is a boot someone paid for.
  *
- * Why it went, and what it cost to keep:
+ * The 0x200440a0 path was REMOVED on 2026-07-31 and is not what runs now; the
+ * A9 global timer below replaced it later the same day. Why the old one went,
+ * and what it cost to keep:
  *
  *  1. The counter at 0x200440a0 DOES NOT ADVANCE. Settled 2026-07-28; the
  *     register reads zero (docs/HARDWARE-CONSTANTS.md). The old code probed it
@@ -72,12 +74,66 @@
  * which makes the same point about the address.
  */
 /*
- * Deliberately generous, where slow beats hung. This is the ONLY delay path in
- * the SPL -- see the removal note above.
+ * THE TIMEBASE, 2026-07-31: the Cortex-A9 MPCore global timer.
+ *
+ * Not the block this file used to point at. PERIPHBASE is 0x1013c000
+ * (device tier: SCU Control reads 0x21, SCU Config 0x531), and the TRM's
+ * private-memory map puts a 64-bit incrementing global timer at +0x200 with its
+ * control register at +0x208. Unlike 0x200440a0 it is guaranteed by the CPU
+ * rather than by the SoC integrator.
+ *
+ * Confirmed live at our own U-Boot prompt, device tier: the whole window reads
+ * zero until bit 0 of +0x208 is written -- the vendor kernel never uses this
+ * block -- and then the counter advances.
+ *
+ * RATE. PERIPHCLK = CPU/4, measured at two operating points (228.3 MHz at a
+ * 912 MHz Android CPU; 159.9 MHz at our 600 MHz APLL). What the CPU runs at
+ * HERE is genuinely open: the BootROM is documented to raise APLL to 192 MHz and
+ * record 0xC0 at 0x10080000, while this file's own behavioural note says the core
+ * looks near 24 MHz. That spread is 48 MHz vs 6 MHz of PERIPHCLK.
+ *
+ * So the constant OVERESTIMATES on purpose. Waiting `usec * TICKS_PER_US` ticks
+ * takes usec * (TICKS_PER_US / real_rate_MHz) of real time, so too high a
+ * constant errs LONG and too low errs SHORT -- and DDR delays are minimums,
+ * where long is safe and short is not. At 48 the delay is exact if the ROM did
+ * raise the clock and 8x too long if it did not. Task: measure it and set it
+ * exactly (docs/BLOCKERS.md).
+ *
+ * Still 32-bit arithmetic only. `(u64)usec * rate / 1000000` is what pulled
+ * __aeabi_uldivmod and lib1funcs.o into this binary -- 816 bytes, 21% of it --
+ * for a counter that never ticked. A multiply by a small integer needs neither.
+ * usec * 48 overflows u32 only past ~89 s.
+ *
+ * The spin fallback STAYS, and is not vestigial: if the counter does not advance
+ * this SPL has no console to report that with, and a wait-for-ticks loop on a
+ * dead counter is an unbreakable hang. Liveness is probed once, in
+ * rockchip_stimer_init(), and only a counter observed moving is used.
+ *
+ * Constraints carried over, both still live:
+ *  - do NOT route this through lib/time.c's CFG_SYS_TIMER_* path. That change
+ *    stopped the SPL booting on 2026-07-27, from a state that had reached "DRAM
+ *    trained" and handed off over SD.
+ *  - the rate assumption breaks if PLL setup ever moves into the SPL, which is
+ *    a planned change: the clock would then change mid-binary.
+ */
+#define A9_PERIPHBASE		0x1013c000
+#define A9_GT_COUNTER_LO	(A9_PERIPHBASE + 0x200)
+#define A9_GT_CONTROL		(A9_PERIPHBASE + 0x208)
+#define A9_GT_CTRL_ENABLE	BIT(0)
+
+/* CPU 192 MHz / 4. See the rate discussion above: high errs long, which is safe. */
+#define SPL_GT_TICKS_PER_US	48
+
+/*
+ * Deliberately generous, where slow beats hung. Used only when the global timer
+ * is not advancing.
  */
 #define SPL_FALLBACK_LOOPS_PER_US	12
 
-void __udelay(unsigned long usec)
+/* Zero until proven otherwise, so a failed probe cannot select the timer path. */
+static u32 spl_gt_ticks_per_us;
+
+static void spl_udelay_spin(unsigned long usec)
 {
 	volatile u32 i;
 	u32 loops = usec * SPL_FALLBACK_LOOPS_PER_US;
@@ -86,17 +142,55 @@ void __udelay(unsigned long usec)
 		;
 }
 
+void __udelay(unsigned long usec)
+{
+	u32 start, ticks;
+
+	if (!spl_gt_ticks_per_us) {
+		spl_udelay_spin(usec);
+		return;
+	}
+
+	ticks = usec * spl_gt_ticks_per_us;
+	start = readl((void __iomem *)A9_GT_COUNTER_LO);
+
+	/* Unsigned difference, so the 32-bit wrap needs no special case. */
+	while ((readl((void __iomem *)A9_GT_COUNTER_LO) - start) < ticks)
+		;
+}
+
 /*
- * MUST remain an override even though it does nothing.
+ * MUST remain an override, and now it also does the work.
  *
  * The weak generic version (arch/arm/mach-rockchip/spl_common.c) writes CNTFRQ
  * with `mcr p15, 0, %0, c14, c0, 0`. That is the ARM Generic Timer, which
  * Cortex-A9 does not implement (DDI0407I has no CNTFRQ/CNTPCT at all), so the
  * instruction is UNDEFINED here. Deleting this function does not remove code --
  * it substitutes an undefined-instruction trap.
+ *
+ * Enable the global timer, then PROVE it moves before letting __udelay() depend
+ * on it. Writing bit 0 alone leaves the prescaler at divide-by-1 and both
+ * comparator and IRQ disabled, so this cannot raise an interrupt.
+ *
+ * The probe is a raw spin, not a delay: there is no timebase yet, and it needs
+ * only to be long enough that a live counter certainly moves. Called after
+ * debug_uart_init() and before sdram_init(), so it is in place for every delay
+ * DDR training takes.
  */
 void rockchip_stimer_init(void)
 {
+	volatile u32 i;
+	u32 a, b;
+
+	writel(A9_GT_CTRL_ENABLE, (void __iomem *)A9_GT_CONTROL);
+
+	a = readl((void __iomem *)A9_GT_COUNTER_LO);
+	for (i = 0; i < 1000; i++)
+		;
+	b = readl((void __iomem *)A9_GT_COUNTER_LO);
+
+	if (b != a)
+		spl_gt_ticks_per_us = SPL_GT_TICKS_PER_US;
 }
 
 /*
