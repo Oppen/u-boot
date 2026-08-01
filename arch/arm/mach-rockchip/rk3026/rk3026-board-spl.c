@@ -18,9 +18,6 @@
  */
 
 #include <debug_uart.h>
-#include <dm.h>
-#include <dm/root.h>
-#include <dm/uclass.h>
 #include <init.h>
 #include <asm/io.h>
 #include <linux/delay.h>
@@ -60,13 +57,13 @@
  *     are minimums, so slow is safe and fast is not -- which is why this has not
  *     been "optimised".
  *
- *     That was written when the SPL ran at 24 MHz throughout, because PLL setup
- *     happened in the CRU probe in U-Boot proper, from DRAM. board_init_f() now
- *     probes that same driver here instead.
+ *     The SPL also runs before our PLL setup (that happens in the CRU probe, in
+ *     U-Boot proper, from DRAM -- the wrong stage, see docs/UPSTREAM-ALIGNMENT.md),
+ *     so the core is still near 24 MHz here. Behavioural corroboration: the
+ *     pre-relocation LED rhythms look slower than the post-relocation ones.
  *
- * The SPL timebase is now measured in-binary against timer0's fixed 24 MHz, and
- * reported at the prompt via GRF scratch. `sleep 30` still only proves
- * get_timer()/mdelay() in U-Boot proper (2026-07-30).
+ * THE SPL TIMEBASE IS UNVERIFIED. `sleep 30` proved get_timer()/mdelay() in
+ * U-Boot proper only (2026-07-30); nothing equivalent exists for this binary.
  *
  *
  * This file is the configuration that reached "DRAM trained" and handed off to
@@ -89,19 +86,18 @@
  * zero until bit 0 of +0x208 is written -- the vendor kernel never uses this
  * block -- and then the counter advances.
  *
- * RATE IS MEASURED, NOT ASSUMED. PERIPHCLK = CPU/4 at three operating points now
- * (228.3 MHz at a 912 MHz Android CPU; 159.9 MHz at our 600 MHz APLL; 6 MHz with
- * the PLLs bypassed). The SPL measures it every boot against timer0 -- see
- * spl_gt_measure_mhz() -- so no constant has to be trusted.
+ * RATE. PERIPHCLK = CPU/4, measured at two operating points (228.3 MHz at a
+ * 912 MHz Android CPU; 159.9 MHz at our 600 MHz APLL). What the CPU runs at
+ * HERE is genuinely open: the BootROM is documented to raise APLL to 192 MHz and
+ * record 0xC0 at 0x10080000, while this file's own behavioural note says the core
+ * looks near 24 MHz. That spread is 48 MHz vs 6 MHz of PERIPHCLK.
  *
- * The 6 MHz reading is what refuted "the BootROM raises APLL to 192 MHz before
- * handing over": it does not, and board_init_f() now raises the PLLs itself
- * through the CRU driver BEFORE this measurement is taken.
- *
- * The remaining constant is only a fallback, and it OVERESTIMATES on purpose.
- * Waiting `usec * TICKS_PER_US` ticks takes usec * (TICKS_PER_US /
- * real_rate_MHz) of real time, so too high errs LONG and too low errs SHORT --
- * and DDR delays are minimums, where long is safe and short is not.
+ * So the constant OVERESTIMATES on purpose. Waiting `usec * TICKS_PER_US` ticks
+ * takes usec * (TICKS_PER_US / real_rate_MHz) of real time, so too high a
+ * constant errs LONG and too low errs SHORT -- and DDR delays are minimums,
+ * where long is safe and short is not. At 48 the delay is exact if the ROM did
+ * raise the clock and 8x too long if it did not. Task: measure it and set it
+ * exactly (docs/BLOCKERS.md).
  *
  * Still 32-bit arithmetic only. `(u64)usec * rate / 1000000` is what pulled
  * __aeabi_uldivmod and lib1funcs.o into this binary -- 816 bytes, 21% of it --
@@ -117,9 +113,8 @@
  *  - do NOT route this through lib/time.c's CFG_SYS_TIMER_* path. That change
  *    stopped the SPL booting on 2026-07-27, from a state that had reached "DRAM
  *    trained" and handed off over SD.
- *  - the PLLs are now raised in the SPL, so the rate CHANGES mid-binary. The
- *    calibration must therefore run after that, never before: measuring at
- *    24 MHz and then raising the clock leaves every delay 25x too SHORT.
+ *  - the rate assumption breaks if PLL setup ever moves into the SPL, which is
+ *    a planned change: the clock would then change mid-binary.
  */
 #define A9_PERIPHBASE		0x1013c000
 #define A9_GT_COUNTER_LO	(A9_PERIPHBASE + 0x200)
@@ -547,9 +542,6 @@ static void boox_counter_probe(void)
 
 void board_init_f(ulong dummy)
 {
-	struct udevice *cru;
-	int ret;
-
 	/*
 	 * LED first, before any other peripheral is touched.  It is the only
 	 * output we have, so anything that can hang -- a gated timer block, the
@@ -561,42 +553,12 @@ void board_init_f(ulong dummy)
 	/* 1: the ROM branched into us. First point at which anything is safe. */
 	BOOX_STEP(1);
 
-	/*
-	 * SPL_SERIAL is off, so there is no serial in this phase and
-	 * debug_uart_init() does not exist. Nothing is lost: UART2 is unsoldered,
-	 * and the LED is the SPL's only signal.
-	 */
-#if defined(CONFIG_DEBUG_UART) && CONFIG_IS_ENABLED(SERIAL)
+#ifdef CONFIG_DEBUG_UART
 	debug_uart_init();
 #endif
 
 	/* 2: the debug UART did not hang. */
 	BOOX_STEP(2);
-
-	/*
-	 * Raise the PLLs HERE, through the CRU driver, before anything is timed.
-	 *
-	 * The SPL runs at 24 MHz otherwise -- measured, not assumed: the A9 global
-	 * timer reads 6 MHz here and PERIPHCLK is CPU/4
-	 * (docs/HARDWARE-CONSTANTS.md). U-Boot proper reaches 600 MHz from this
-	 * same driver's probe, so everything in the SPL, DDR training included,
-	 * has been running 25x slower than the hardware allows.
-	 *
-	 * Via DM and the real driver, not a copy: rkclk_init() stays the single
-	 * source of truth. spl_early_init() lives in SPL_FRAMEWORK, which is off,
-	 * so DM is started directly -- and with OF_PLATDATA there is no tree to
-	 * scan, hence `false` (the same expression common/spl/spl.c:517 uses).
-	 *
-	 * ORDER IS LOAD-BEARING: rockchip_stimer_init() measures the global timer
-	 * against timer0, so it must run AFTER this. Calibrating first and then
-	 * raising the clock would leave ticks_per_us 25x low, i.e. every DDR delay
-	 * 25x too SHORT -- the unsafe direction.
-	 */
-	ret = dm_init_and_scan(!CONFIG_IS_ENABLED(OF_PLATDATA));
-	if (!ret)
-		uclass_get_device_by_driver(UCLASS_CLK,
-					    DM_DRIVER_GET(rockchip_rk3026_cru),
-					    &cru);
 
 	rockchip_stimer_init();
 
