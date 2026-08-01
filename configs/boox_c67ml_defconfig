@@ -184,6 +184,10 @@ CONFIG_SYSRESET=y
 # CONFIG_SPL_SYSRESET is not set
 CONFIG_TIMER=y
 CONFIG_ROCKCHIP_TIMER=y
+# A9 MPCore global timer: 64-bit, and its driver reads the halves with a
+# high/low/high retry, unlike the rockchip timer which needed that fixed.
+# Requires /chosen/tick-timer, supplied in the -u-boot.dtsi.
+CONFIG_ARM_GLOBAL_TIMER=y
 # USB CDC-ACM console. The OTG controller (usb@10180000, dwc2) is the only
 # bidirectional channel this board has without soldering to the UART leads.
 #

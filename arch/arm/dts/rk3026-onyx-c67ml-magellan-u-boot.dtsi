@@ -67,3 +67,30 @@
 &{/timer@20044000} {
 	clock-frequency = <24000000>;
 };
+
+/*
+ * Make the A9 MPCore global timer the DM tick timer.
+ *
+ * dm_timer_init() looks for /chosen/tick-timer and gives up without it -- which
+ * is why an earlier note in docs/BLOCKERS.md said enabling ARM_GLOBAL_TIMER
+ * "would hang the console": the symbol alone, with no chosen node, leaves the
+ * timebase unresolved. Supplying the node is the missing half.
+ *
+ * Written as a reference (tick-timer = &node), the form every in-tree user
+ * takes -- see am335x-bone-common.dtsi -- not as a path string.
+ *
+ * Its rate comes from clocks = <&cru CORE_PERI> in rk3026.dtsi, which is now
+ * both implemented in the driver and MEASURED correct: 100.0139 MHz against
+ * APLL/6 = 100.000 MHz (docs/HARDWARE-CONSTANTS.md).
+ *
+ * Two reasons to prefer it over timer0: it is a genuine 64-bit counter, and
+ * arm_global_timer.c already reads the halves with a high/low/high retry, so it
+ * is structurally free of the torn read that timer0 needed a fix for.
+ */
+&{/chosen} {
+	tick-timer = &global_timer;
+};
+
+&global_timer {
+	bootph-all;
+};
