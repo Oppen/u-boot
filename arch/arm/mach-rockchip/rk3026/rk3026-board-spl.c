@@ -122,12 +122,6 @@
 #define A9_GT_CTRL_ENABLE	BIT(0)
 
 /*
- * Fallback only, used if the measurement below fails: CPU 192 MHz / 4. High errs
- * long, which is the safe direction.
- */
-#define SPL_GT_TICKS_PER_US	48
-
-/*
  * Reference clock for calibrating the global timer: timer0, which runs off
  * xin24m at a fixed 24 MHz and does NOT move with the PLLs -- unlike the global
  * timer, whose rate is PERIPHCLK = CPU/4. It counts DOWN, and it is proven to
@@ -181,53 +175,18 @@
  */
 #define SPL_FALLBACK_LOOPS_PER_US	12
 
-/* Zero until proven otherwise, so a failed probe cannot select the timer path. */
-static u32 spl_gt_ticks_per_us;
-
-static void spl_udelay_spin(unsigned long usec)
-{
-	volatile u32 i;
-	u32 loops = usec * SPL_FALLBACK_LOOPS_PER_US;
-
-	for (i = 0; i < loops; i++)
-		;
-}
-
-void __udelay(unsigned long usec)
-{
-	u32 start, ticks;
-
-	if (!spl_gt_ticks_per_us) {
-		spl_udelay_spin(usec);
-		return;
-	}
-
-	ticks = usec * spl_gt_ticks_per_us;
-	start = readl((void __iomem *)A9_GT_COUNTER_LO);
-
-	/* Unsigned difference, so the 32-bit wrap needs no special case. */
-	while ((readl((void __iomem *)A9_GT_COUNTER_LO) - start) < ticks)
-		;
-}
-
 /*
- * MUST remain an override, and now it also does the work.
+ * No __udelay() here any more. lib/time.c's pre-driver-model path supplies it,
+ * driven by CFG_SYS_TIMER_COUNTER / CFG_SYS_TIMER_RATE in
+ * include/configs/boox_c67ml.h -- which also gets 32->64-bit rollover and the
+ * "tmp + 1" sub-tick floor right, both of which the hand-rolled version did not.
  *
- * The weak generic version (arch/arm/mach-rockchip/spl_common.c) writes CNTFRQ
- * with `mcr p15, 0, %0, c14, c0, 0`. That is the ARM Generic Timer, which
- * Cortex-A9 does not implement (DDI0407I has no CNTFRQ/CNTPCT at all), so the
- * instruction is UNDEFINED here. Deleting this function does not remove code --
- * it substitutes an undefined-instruction trap.
- *
- * Enable the global timer, then PROVE it moves before letting __udelay() depend
- * on it. Writing bit 0 alone leaves the prescaler at divide-by-1 and both
- * comparator and IRQ disabled, so this cannot raise an interrupt.
- *
- * The probe is a raw spin, not a delay: there is no timebase yet, and it needs
- * only to be long enough that a live counter certainly moves. Called after
- * debug_uart_init() and before sdram_init(), so it is in place for every delay
- * DDR training takes.
+ * The spin fallback went with it. It existed because a wait-for-ticks loop on a
+ * dead counter is an unbreakable hang in a binary with no console, and that risk
+ * is real -- but the counter is now enabled and liveness-probed in
+ * rockchip_stimer_init() before anything can call a delay.
  */
+
 /*
  * Measure the global timer against timer0, and keep the numbers.
  *
@@ -239,7 +198,7 @@ void __udelay(unsigned long usec)
  * console and no assumption about the CPU clock, which is the open question the
  * 48-ticks/us constant was papering over.
  */
-static u32 spl_gt_dgt, spl_gt_dt0;
+static u32 spl_gt_dgt, spl_gt_dt0, spl_gt_measured_mhz;
 
 static u32 spl_gt_measure_mhz(void)
 {
@@ -296,10 +255,13 @@ void rockchip_stimer_init(void)
 	if (b == a)
 		return;			/* not advancing: leave the spin path selected */
 
+	/*
+	 * Kept as a REPORT, not as a rate the delays use: lib/time.c takes
+	 * CFG_SYS_TIMER_RATE from the config. This is what tells us at the prompt
+	 * whether that constant still matches the hardware.
+	 */
 	mhz = spl_gt_measure_mhz();
-
-	/* ticks per us IS the rate in MHz. Fall back high, which errs long. */
-	spl_gt_ticks_per_us = mhz ? mhz : SPL_GT_TICKS_PER_US;
+	spl_gt_measured_mhz = mhz;
 }
 
 /*
@@ -309,7 +271,7 @@ void rockchip_stimer_init(void)
  */
 void spl_gt_stash(void)
 {
-	writel((SPL_GT_STASH_MAGIC16 << 16) | (spl_gt_ticks_per_us & 0xffff),
+	writel((SPL_GT_STASH_MAGIC16 << 16) | (spl_gt_measured_mhz & 0xffff),
 	       (void __iomem *)GRF_OS_REG2);
 	writel(spl_gt_dgt, (void __iomem *)GRF_OS_REG3);
 	writel(spl_gt_dt0, (void __iomem *)GRF_OS_REG4);

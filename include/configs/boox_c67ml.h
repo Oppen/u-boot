@@ -42,10 +42,30 @@
  * get_tbclk() in lib/time.c.
  */
 /*
- * No CFG_SYS_TIMER_* here. The SPL defines its own __udelay() in
- * rk3026-board-spl.c; routing it through lib/time.c's pre-driver-model path
- * instead is what stopped the SPL booting on 2026-07-27 (it had reached "DRAM
- * trained" and handed off to U-Boot proper immediately before that change).
+ * SPL timebase: the A9 MPCore global timer, through lib/time.c's
+ * pre-driver-model path. Enabled in rockchip_stimer_init() before any delay.
+ *
+ * Counts UP and is 64-bit, so CONFIG_SYS_TIMER_COUNTS_DOWN must stay OFF -- the
+ * counter this replaces (timer0, via the SPL's own __udelay) counted down.
+ *
+ * The rate is MEASURED in the SPL itself, against timer0's fixed 24 MHz xin24m
+ * reference with no human timing: 24 * 505051 / 2020238 = 5.99991 MHz. It is
+ * CORE_PERI = APLL / (CLKSEL_CON1[3:0] + 1), and at BROM defaults that is
+ * 24 MHz / 4.
+ *
+ * ⚠️ THIS CONSTANT IS ONLY VALID WHILE THE SPL LEAVES THE PLLS ALONE. Raising
+ * APLL in the SPL -- the planned change -- moves CORE_PERI with it and makes
+ * every delay here wrong by that ratio. Re-measure and re-derive before doing
+ * it, or give the SPL a rate it reads at runtime.
+ *
+ * Routing the SPL through this path is what stopped it booting on 2026-07-27 --
+ * but that pointed CFG_SYS_TIMER_COUNTER at 0x200440a0, a counter that never
+ * ticks. The address below is a block that demonstrably counts.
  */
+#ifdef CONFIG_XPL_BUILD
+#define CFG_SYS_TIMER_COUNTER	0x1013c200
+#define CFG_SYS_TIMER_RATE	6000000
+#endif	/* SPL only: U-Boot proper has CONFIG_TIMER, and lib/time.c defines
+	 * get_tbclk() twice if both paths are configured. */
 
 #endif

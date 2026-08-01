@@ -228,7 +228,8 @@ CONFIG_USB_FUNCTION_ACM=y
 # presented as the 2026-07-30 "board alive, console dead" regression.
 CONFIG_USB_GADGET_DOWNLOAD=y
 # CONFIG_USB_FUNCTION_FASTBOOT is not set
-CONFIG_SYS_TIMER_COUNTS_DOWN=y
+# The A9 global timer counts UP; the old SPL counter counted down.
+# CONFIG_SYS_TIMER_COUNTS_DOWN is not set
 CONFIG_SPL_TINY_MEMSET=y
 # MMC, re-enabled 2026-07-29. It was off because initr_mmc (board_r.c:748) runs
 # BEFORE console_init_r (:780) and the dwmmc probe hung in the CRU clock lookup,
