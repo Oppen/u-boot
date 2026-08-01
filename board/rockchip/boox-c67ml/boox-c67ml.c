@@ -19,6 +19,8 @@
 #include <event.h>
 #include <fdtdec.h>
 #include <init.h>
+#include <iomux.h>
+#include <stdio.h>
 #include <time.h>
 #include <asm/global_data.h>
 #include <asm/io.h>
@@ -326,6 +328,32 @@ void otg_phy_init(struct dwc2_udc *dev)
 void otg_phy_off(struct dwc2_udc *dev)
 {
 	writel(0x00e000e0, (void __iomem *)CRU_SOFTRST_CON4);
+}
+
+/*
+ * Hand Linux a USB core that is no longer enumerated.
+ *
+ * Nothing released the gadget before this: board_quiesce_devices() is a weak
+ * no-op (boot/bootm.c:50), and acm_stdio_stop() -- which does the real work,
+ * g_dnl_unregister() (f_acm.c:676) -- only runs when the ACM device stops being
+ * a console, which booting a kernel never did. Observed consequence
+ * (2026-07-31): the host kept a live CDC-ACM device right across the handoff,
+ * so Linux inherited a configured dwc2 core.
+ *
+ * Reassigning the consoles is what triggers that teardown, and the ordering is
+ * load-bearing: acm_stdio_stop() sets stdio_dev->priv to NULL and the unbind
+ * frees the f_acm, so anything printing to usbacm afterwards would dereference
+ * freed memory. bootm prints "Starting kernel ..." BEFORE calling us and prints
+ * nothing after, so this is the last safe point (boot/bootm.c:1200-1219).
+ *
+ * otg_phy_off() is deliberately NOT called: it asserts SOFTRST_CON4 and never
+ * deasserts, which would hand Linux a PHY held in reset.
+ */
+void board_quiesce_devices(void)
+{
+	iomux_doenv(stdin, "serial");
+	iomux_doenv(stdout, "serial");
+	iomux_doenv(stderr, "serial");
 }
 #endif
 int dram_init(void)
