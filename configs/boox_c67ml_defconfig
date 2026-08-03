@@ -328,13 +328,50 @@ CONFIG_CMD_STRINGS=y
 # and hid this. There is no kernel on the card yet, so autoboot has nothing to do
 # that is worth losing the prompt over; type `bootflow scan` when it is wanted.
 CONFIG_BOOTDELAY=-1
-# MMC command tracing. Diagnostic only, and it is here because U-Boot hides the
-# one thing we need: `mmc dev 0` returns SILENTLY on failure --
-# __init_mmc_device() (cmd/mmc.c) does `if (mmc_init(mmc)) return NULL;` with no
-# print, and do_mmc_dev then returns CMD_RET_FAILURE printing nothing either. So
-# on 2026-07-29 `mmc list` showed mmc@10214000:0, `mmc dev 0` printed NOTHING, and
-# `fatls mmc 0:1` said "Bad device specification" -- i.e. the controller binds and
-# mmc_init() fails invisibly. MMC_TRACE logs every CMD and response, which says
-# whether the card answers CMD0/CMD8/ACMD41 at all.
-# Remove once the card initialises; it is noisy per command.
-CONFIG_MMC_TRACE=y
+# MMC command tracing: OFF as of 2026-08-03, its job is done.
+#
+# It was added because U-Boot hides the one thing we needed: `mmc dev 0` returns
+# SILENTLY on failure -- __init_mmc_device() (cmd/mmc.c) does
+# `if (mmc_init(mmc)) return NULL;` with no print, and do_mmc_dev then returns
+# CMD_RET_FAILURE printing nothing either. On 2026-07-29 `mmc list` showed
+# mmc@10214000:0, `mmc dev 0` printed NOTHING, and `fatls mmc 0:1` said "Bad
+# device specification" -- the controller bound and mmc_init() failed invisibly.
+#
+# The card initialises now, and the trace costs ~1300 lines per `bootflow scan`,
+# which buries everything that matters -- on 2026-08-03 it made a boot log
+# unreadable while chasing a dead console. It also produced the one fact worth
+# keeping: the 32 GB SanDisk answers ACMD41 with OCR 0xc0ff8000
+# (docs/HOW-TO.md §6a), which is why that card boots the conventional LBA-64
+# copy rather than needing the OCR-shifted one.
+#
+# Re-add it if mmc_init() ever fails silently again; nothing else reports that.
+# CONFIG_MMC_TRACE is not set
+
+# Read the kernel's ramoops log from the U-Boot prompt.
+#
+# This is the consumer ramoops needs: if a console exists the kernel's own
+# dmesg is enough, so the only case ramoops matters is the one where there is
+# no console -- and then the reader has to be the stage that still has one.
+# U-Boot already ships the command (cmd/pstore.c), so nothing is hand-written.
+#
+# `strings` is NOT a substitute and must not be used on this region: do_strings
+# tests its end address only AFTER each string completes, so text without a
+# trailing double NUL runs past the bound and wedges the console. That happened
+# on 2026-08-03. `pstore display console` reads the persistent_ram header and
+# prints exactly prb->size bytes, handling the wrapped case properly.
+#
+# Values MATCH the ramoops node in the board dts -- 1 MiB at 0x64100000,
+# console-only. record/ftrace/pmsg are 0 there, so they are 0 here; with no
+# dump zones the console ring starts at the base address. If the dts changes,
+# these must change with it or `pstore display` reads the wrong offset.
+#
+# `pstore save mmc 0:1 /` writes it to the FAT boot partition, which beats
+# pasting hex out of the console.
+CONFIG_CMD_PSTORE=y
+CONFIG_CMD_PSTORE_MEM_ADDR=0x64100000
+CONFIG_CMD_PSTORE_MEM_SIZE=0x100000
+CONFIG_CMD_PSTORE_RECORD_SIZE=0x0
+CONFIG_CMD_PSTORE_CONSOLE_SIZE=0x100000
+CONFIG_CMD_PSTORE_FTRACE_SIZE=0x0
+CONFIG_CMD_PSTORE_PMSG_SIZE=0x0
+CONFIG_CMD_PSTORE_ECC_SIZE=0

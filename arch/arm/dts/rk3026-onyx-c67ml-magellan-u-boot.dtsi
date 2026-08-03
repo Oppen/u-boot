@@ -93,4 +93,25 @@
 
 &global_timer {
 	bootph-all;
+
+	/*
+	 * Canonical DISABLES this node, correctly, for Linux: arm_global_timer's
+	 * rate follows the CPU, so its clocksource and sched_clock go wrong the
+	 * moment cpufreq moves armclk.
+	 *
+	 * U-Boot is the genuine exception and this is the ONLY legitimate DTS
+	 * difference between the two builds: no cpufreq, APLL set once, and the
+	 * U-Boot clk driver does implement CORE_PERI (measured 100.0139 MHz
+	 * against APLL/6 = 100.000 MHz).
+	 *
+	 * It lives here rather than in dts/ because this overlay is the one file
+	 * propagation never overwrites -- the same reason the timer0
+	 * clock-frequency workaround above sits here after f513e0e lost it.
+	 *
+	 * ⚠️ Without this, the tick-timer reference above resolves to a disabled
+	 * node, get_timer() is dead, and wait_for_bit_le32() spins forever
+	 * instead of timing out (include/wait_bit.h:45) -- which presents as
+	 * U-Boot hanging with no console, not as an error.
+	 */
+	status = "okay";
 };

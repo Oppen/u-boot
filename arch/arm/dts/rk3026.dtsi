@@ -109,11 +109,36 @@
 		      <0x1013c100 0x100>;
 	};
 
+	/*
+	 * DISABLED ON PURPOSE, exactly as mainline does for the other Rockchip
+	 * Cortex-A9 parts (rk3xxx.dtsi): the clocksource and sched_clock the
+	 * arm_global_timer provides are unstable here because its rate follows
+	 * the CPU frequency. Keeping it off lets ROCKCHIP_TIMER be selected
+	 * instead, which is what we want and what already runs (rk_timer).
+	 *
+	 * Left enabled, it produced:
+	 *     ARM Global timer register failed (-22)
+	 *     Failed to initialize '/timer@1013c200': -22
+	 * because clk-rk3026.c registers the CLKSEL_CON(1)[3:0] core-periph
+	 * divider with id 0 rather than CORE_PERI, so of_clk_get() finds
+	 * nothing and arm_global_timer bails with -EINVAL.
+	 *
+	 * ⚠️ Do NOT "fix" that by exporting CORE_PERI from the clock driver.
+	 * That makes the global timer register SUCCESSFULLY and become the
+	 * clocksource -- the precise failure mainline's comment warns about,
+	 * and it gets worse once cpufreq-dt works and armclk actually moves.
+	 * The error message is the symptom; the enabled node is the bug.
+	 *
+	 * U-Boot is a different case and legitimately uses this timer: it has
+	 * no cpufreq, sets APLL once, and its clk driver does implement
+	 * CORE_PERI (measured 100.0139 MHz vs APLL/6).
+	 */
 	global_timer: timer@1013c200 {
 		compatible = "arm,cortex-a9-global-timer";
 		reg = <0x1013c200 0x20>;
 		interrupts = <GIC_PPI 11 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_HIGH)>;
 		clocks = <&cru CORE_PERI>;
+		status = "disabled";
 	};
 
 	local_timer: timer@1013c600 {
@@ -206,7 +231,12 @@
 	};
 
 	i2c0: i2c@20072000 {
-		compatible = "rockchip,rk3026-i2c", "rockchip,rk3288-i2c";
+		/* Not rk3288-i2c: that variant declares no GRF mode select, and
+		 * RK3026 needs one. soc_con1 bit 11+n picks RKI2C over the legacy
+		 * DW-I2C block, no bootloader stage sets it, and a warm reset
+		 * wipes GRF -- so the fallback binds and then never transfers. */
+		compatible = "rockchip,rk3026-i2c";
+		rockchip,grf = <&grf>;
 		reg = <0x20072000 0x1000>;
 		interrupts = <GIC_SPI 24 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&cru PCLK_I2C0>;
@@ -219,7 +249,12 @@
 	};
 
 	i2c1: i2c@20056000 {
-		compatible = "rockchip,rk3026-i2c", "rockchip,rk3288-i2c";
+		/* Not rk3288-i2c: that variant declares no GRF mode select, and
+		 * RK3026 needs one. soc_con1 bit 11+n picks RKI2C over the legacy
+		 * DW-I2C block, no bootloader stage sets it, and a warm reset
+		 * wipes GRF -- so the fallback binds and then never transfers. */
+		compatible = "rockchip,rk3026-i2c";
+		rockchip,grf = <&grf>;
 		reg = <0x20056000 0x1000>;
 		interrupts = <GIC_SPI 25 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&cru PCLK_I2C1>;
@@ -232,7 +267,12 @@
 	};
 
 	i2c2: i2c@2005a000 {
-		compatible = "rockchip,rk3026-i2c", "rockchip,rk3288-i2c";
+		/* Not rk3288-i2c: that variant declares no GRF mode select, and
+		 * RK3026 needs one. soc_con1 bit 11+n picks RKI2C over the legacy
+		 * DW-I2C block, no bootloader stage sets it, and a warm reset
+		 * wipes GRF -- so the fallback binds and then never transfers. */
+		compatible = "rockchip,rk3026-i2c";
+		rockchip,grf = <&grf>;
 		reg = <0x2005a000 0x1000>;
 		interrupts = <GIC_SPI 26 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&cru PCLK_I2C2>;
@@ -245,7 +285,12 @@
 	};
 
 	i2c3: i2c@2005e000 {
-		compatible = "rockchip,rk3026-i2c", "rockchip,rk3288-i2c";
+		/* Not rk3288-i2c: that variant declares no GRF mode select, and
+		 * RK3026 needs one. soc_con1 bit 11+n picks RKI2C over the legacy
+		 * DW-I2C block, no bootloader stage sets it, and a warm reset
+		 * wipes GRF -- so the fallback binds and then never transfers. */
+		compatible = "rockchip,rk3026-i2c";
+		rockchip,grf = <&grf>;
 		reg = <0x2005e000 0x1000>;
 		interrupts = <GIC_SPI 27 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&cru PCLK_I2C3>;
@@ -523,8 +568,22 @@
 		compatible = "rockchip,rk3026-ebc";
 		reg = <0x10114000 0x4000>;
 		interrupts = <GIC_SPI 49 IRQ_TYPE_LEVEL_HIGH>;
-		clocks = <&cru HCLK_EBC>, <&cru DCLK_EBC>, <&cru ACLK_LCDC1>;
-		clock-names = "hclk", "dclk", "aclk";
+		/*
+		 * "aclk" is ACLK_LCDC1, the video NIU. "mclk" is ACLK_EBC, the
+		 * block's own AXI master port -- its parent aclk_lcdc0_src is
+		 * gated at CLKGATE_CON3 bit 0 and nothing else requests it.
+		 *
+		 * "dclk-parent" is GPLL, asserted as dclk's parent by the driver
+		 * AFTER clk_set_rate(); assigned-clock-parents here was a no-op
+		 * because CCF already believed dclk was on GPLL while the mux bit
+		 * said CPLL. GPLL is 132 MHz, so 66 MHz is the reachable maximum
+		 * (vendor runs 80, which needs CPLL at 560 -- docs/BLOCKERS.md).
+		 */
+		clocks = <&cru HCLK_EBC>, <&cru DCLK_EBC>, <&cru ACLK_LCDC1>,
+			 <&cru ACLK_EBC>, <&cru PLL_GPLL>;
+		clock-names = "hclk", "dclk", "aclk", "mclk", "dclk-parent";
+		pinctrl-names = "default";
+		pinctrl-0 = <&ebc_pins>;
 		rockchip,grf = <&grf>;
 		status = "disabled";
 	};
@@ -750,6 +809,27 @@
 		 * wifi_power.  Vendor iomux.h function map, for reference:
 		 * A0 MCLK, A1 SCLK, A2 LRCKRX, A3 LRCKTX, A4 SDO, A5 SDI.
 		 */
+
+		ebc {
+			/*
+			 * The eight pads the vendor's ebc_io_init muxes, blob tier:
+			 * iomux_set(0x2b02, 0x2b12, 0x2b22, 0x2b32, 0x2c12, 0x2c22,
+			 * 0x2d02, 0x2d12) at 0xc0459ef0, decoded in
+			 * docs/re/GRF-DERIVATION.md -- bank 2, groups B/C/D, all func 2.
+			 * Nothing in our tree muxed them, so the controller scanned
+			 * correctly into pads that were still GPIOs.
+			 */
+			ebc_pins: ebc-pins {
+				rockchip,pins = <2 8 2 &pcfg_pull_none>,
+						<2 9 2 &pcfg_pull_none>,
+						<2 10 2 &pcfg_pull_none>,
+						<2 11 2 &pcfg_pull_none>,
+						<2 17 2 &pcfg_pull_none>,
+						<2 18 2 &pcfg_pull_none>,
+						<2 24 2 &pcfg_pull_none>,
+						<2 25 2 &pcfg_pull_none>;
+			};
+		};
 
 		emmc {
 			/*
