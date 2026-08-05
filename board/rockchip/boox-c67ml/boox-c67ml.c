@@ -18,6 +18,7 @@
 #include <env.h>
 #include <event.h>
 #include <fdtdec.h>
+#include <i2c.h>
 #include <init.h>
 #include <iomux.h>
 #include <stdio.h>
@@ -535,12 +536,85 @@ static void boox_report_spl_timer(void)
 	       readl((void __iomem *)GRF_OS_REG4));
 }
 
+/*
+ * ACT8931 LDO4 — the EPD rail the panel cannot image without.
+ *
+ * PROVEN ON HARDWARE 2026-08-05: with LDO4 off the EBC completes scans and the
+ * glass does not move; with LDO4 on and nothing else changed, the same fbpoke
+ * calls drive pigment. Nothing in our boot chain touched this PMIC before, so
+ * every boot inherited whatever ran last, and an imaging boot needed a manual
+ * i2cset from the shell.
+ *
+ * Done here rather than in Linux because Linux has NO act8931 support at all --
+ * exhaustively checked: the string appears in exactly one file in the whole
+ * kernel tree, our own dts. drivers/regulator/act8865-regulator.c covers
+ * 8600/8846/8865 only. U-Boot has no act8865/8931 driver either (it ships
+ * act8846, a different chip), so DM_PMIC/DM_REGULATOR would buy nothing and
+ * cost the coupling its defconfig comment deliberately avoids.
+ *
+ * ⚠️ Bit 7 of the CTRL register ONLY, read-modify-write, and the VSET register
+ * at 0x64 is never touched. That is not fastidiousness: we have no ACT8931
+ * datasheet, so while the register *layout* is corroborated (a live 66-register
+ * sweep matches mainline's ACT8865 map position-for-position, and ACT8865_ENA is
+ * likewise bit 7), the VSET *voltage encoding* is unverified. Writing a voltage
+ * to DCDC2/DCDC3 -- core and logic rails on this board -- would not be a failed
+ * test, it would be a hang or worse.
+ *
+ * ⚠️ OPEN, and the reason this is not the final answer: the vendor cycles LDO4
+ * per refresh (measured 0x41 -> 0xc1 -> 0x41 bracketing every EPD sequence),
+ * and we do not know why. Always-on is demonstrated SUFFICIENT to image, not
+ * demonstrated SAFE: what LDO4 powers is unestablished, and if it feeds
+ * source-driver logic then holding it up while the HV rails are down is a state
+ * the vendor never leaves the panel in. Battery drain is the benign reading.
+ * Per-refresh control needs a Linux regulator the EBC can consume (PENDING P13).
+ */
+#define ACT8931_I2C_BUS		0		/* act8931@5b sits on &i2c0 */
+#define ACT8931_I2C_ADDR	0x5b
+#define ACT8931_LDO4_CTRL	0x65
+#define ACT8931_ENA		BIT(7)
+
+static void boox_enable_epd_rail(void)
+{
+	struct udevice *dev;
+	int ret, val;
+
+	ret = i2c_get_chip_for_busnum(ACT8931_I2C_BUS, ACT8931_I2C_ADDR, 1,
+				      &dev);
+	if (ret) {
+		printf("act8931: no chip at %d:%02x (%d); EPD LDO4 NOT enabled\n",
+		       ACT8931_I2C_BUS, ACT8931_I2C_ADDR, ret);
+		return;
+	}
+
+	val = dm_i2c_reg_read(dev, ACT8931_LDO4_CTRL);
+	if (val < 0) {
+		printf("act8931: LDO4 read failed (%d)\n", val);
+		return;
+	}
+	if (val & ACT8931_ENA) {
+		printf("act8931: LDO4 already on (%02x)\n", val);
+		return;
+	}
+
+	ret = dm_i2c_reg_write(dev, ACT8931_LDO4_CTRL, val | ACT8931_ENA);
+	if (ret) {
+		printf("act8931: LDO4 enable failed (%d)\n", ret);
+		return;
+	}
+
+	/* Report the readback, not the intent: this is the whole point of doing
+	 * it where there is a console. */
+	val = dm_i2c_reg_read(dev, ACT8931_LDO4_CTRL);
+	printf("act8931: LDO4 enabled, reads %02x\n", val);
+}
+
 int misc_init_r(void)
 {
 	/* 8: relocation and the driver model survived. */
 	BOOX_STEP_R(8);
 
 	boox_report_spl_timer();
+	boox_enable_epd_rail();
 
 	/*
 	 * 78: is the timebase alive AFTER relocation? Everything in dwc2 bounds
