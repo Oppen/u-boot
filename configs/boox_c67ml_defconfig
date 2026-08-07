@@ -161,10 +161,17 @@ CONFIG_MISC_INIT_R=y
 #
 # against a 6144 B SRAM window.
 #
-# STALE AS AN ARGUMENT -- corrected 2026-08-07. Read this before quoting 13532.
-# That number is FULL SPL_OF_CONTROL with a live fdt, which is not the shape
-# upstream recommends for a constrained SPL, and SPL_OF_PLATDATA was measured on
-# 2026-08-01 (docs/UPSTREAM-ALIGNMENT.md section 4):
+# DO NOT QUOTE 13532 FOR ANYTHING -- corrected 2026-08-07.
+#
+# It is not merely stale, it is NOT ATTRIBUTABLE: six symbols were enabled at
+# once (SPL_FRAMEWORK + SPL_SYS_MALLOC_F + SPL_LIBCOMMON_SUPPORT +
+# SPL_OF_CONTROL + SPL_TIMER + SPL_DM_SERIAL), so the delta says what that
+# BUNDLE costs and nothing about any member of it -- least of all DM, which is
+# what it kept being cited against. The expensive member is OF_CONTROL's fdtdec
+# + libfdt + embedded DT, which is not the one that was blamed.
+#
+# Measured one axis at a time, in the shape upstream prescribes for a small SPL
+# (docs/UPSTREAM-ALIGNMENT.md section 4, 2026-08-01):
 #
 #   SPL_OF_CONTROL + SPL_OF_PLATDATA + SPL_OF_REAL            4288 B  FITS
 #     (1856 B headroom; DM + dtoc platform data costs 416 B)
