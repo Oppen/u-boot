@@ -187,6 +187,19 @@ CONFIG_MISC_INIT_R=y
 # SPL_SIZE_LIMIT are both 0x0, so an overflow links cleanly and fails on
 # hardware.
 #
+# AND DO NOT TREAT THE ENABLED SPL_DM_* SYMBOLS AS SPENT BUDGET (checked
+# 2026-08-07). .config carries SPL_DM_I2C/MMC/SERIAL/SPI/SPI_FLASH/USB and
+# SPL_DM_INLINE_OFNODE, but only SPL_DM_SERIAL is ours -- the rest are Kconfig
+# "default y" under SPL_DM (drivers/i2c/Kconfig:42, drivers/usb/Kconfig,
+# drivers/mmc/Kconfig), inherited, never chosen. They cost ZERO bytes: LDFLAGS
+# carry --gc-sections (arch/arm/config.mk:17), nothing calls spl_init(), and the
+# map places ZERO drivers/core symbols -- the objects appear only as
+# (--whole-archive) input lines and are discarded. spl/u-boot-spl is
+# text 2999 + data 624 + bss 0.
+#
+# So there is nothing to trade a new subsystem AGAINST. The only real number is
+# what turning DM on costs, which is the 416 B measured above.
+#
 # The link prerequisites, if you retry full OF_CONTROL:
 # SPL_SYS_MALLOC_F depends on SPL_FRAMEWORK; malloc_simple.o (which has calloc)
 # lives in common/ and needs SPL_LIBCOMMON_SUPPORT; the legacy serial core needs
