@@ -69,6 +69,23 @@
 };
 
 /*
+ * timer1 exists in the canonical dtsi so LINUX gets a clocksource (its
+ * rk_timer_init gives the second node to rk_clksrc_init). U-Boot has no use
+ * for it -- /chosen/tick-timer below names the A9 global timer -- but the node
+ * still BINDS as a UCLASS_TIMER device here, and anything that probes it would
+ * hit the same PCLK_TIMER0 gap as the node above: rk3026_clk_get_rate() has no
+ * case for either PCLK_TIMER, so clock_rate stays 0 and timer_post_probe()
+ * rejects the device.
+ *
+ * Carrying the property costs nothing and keeps a probe from failing; it does
+ * NOT make this the timebase. 24 MHz is device-measured, host-referenced
+ * (2026-08-10): 24,003,040 Hz at armclk 600 and 24,002,565 at 504.
+ */
+&{/timer@20044020} {
+	clock-frequency = <24000000>;
+};
+
+/*
  * Make the A9 MPCore global timer the DM tick timer.
  *
  * dm_timer_init() looks for /chosen/tick-timer and gives up without it -- which
