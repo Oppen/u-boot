@@ -40,7 +40,7 @@ DECLARE_GLOBAL_DATA_PTR;
  * as 0 (= GPIO function) on a live device, so no GRF write is needed here.
  *
  * Verified on hardware by toggling this pin from the live vendor Android: it
- * drives the BLUE LED, active-high.  (The nearby red LED is a separate charge
+ * drives the BLUE LED, active-high.  (The nearby red LED is believed to be a charge
  * indicator and is not software-controlled.)
  *
  * Each milestone has its own repeating RHYTHM, not a blink count. A rhythm is
