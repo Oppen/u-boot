@@ -6,6 +6,7 @@ choice
 config TARGET_BOOX_C67ML
 	bool "ONYX BOOX C67ML Magellan"
 	select BOARD_LATE_INIT
+	select RK3026_SPL_TIMER_STASH
 	help
 	  Support for the ONYX BOOX C67ML Magellan 6" e-reader and its
 	  rebrands (DOOKU, Afterglow 2, Tagus Lux, etc).  RK3026 dual-core
@@ -30,6 +31,16 @@ config ROCKCHIP_STIMER_BASE
 	  implemented, so this address should not decode -- yet this is the value
 	  that was in the tree when the SPL demonstrably ran. Do not "fix" it
 	  again without a boot to show for it.
+
+config RK3026_SPL_TIMER_STASH
+	bool
+	help
+	  The SPL measures the A9 global timer against timer0 and leaves the
+	  result in GRF_OS_REG2..4, where the C67ML board code reads it back
+	  and prints it at the prompt; other boards have no reader. OS_REG4
+	  is also the vendor loader's reboot-mode register, and the GRF keeps
+	  it over a warm reset, so a board that may boot the vendor loader
+	  next must not write it.
 
 config SYS_SOC
 	default "rk3026"
