@@ -347,6 +347,8 @@ static int acm_start_data(struct f_acm *f_acm, struct usb_gadget *gadget)
 		return ret;
 
 	f_acm->req_in = acm_start_ep(f_acm->ep_in, acm_tx_complete, f_acm);
+	if (!f_acm->req_in)
+		return -ENOMEM;
 
 	/* EP OUT */
 	d = ep_desc(gadget, &acm_hs_out_desc, &acm_fs_out_desc);
@@ -355,6 +357,8 @@ static int acm_start_data(struct f_acm *f_acm, struct usb_gadget *gadget)
 		return ret;
 
 	f_acm->req_out = acm_start_ep(f_acm->ep_out, acm_rx_complete, f_acm);
+	if (!f_acm->req_out)
+		return -ENOMEM;
 
 	/* Start OUT transfer (EP OUT) */
 	ret = usb_ep_queue(f_acm->ep_out, f_acm->req_out, 0);
@@ -382,11 +386,14 @@ static int acm_set_alt(struct usb_function *f, unsigned int intf, unsigned int a
 {
 	struct usb_gadget *gadget = f->config->cdev->gadget;
 	struct f_acm *f_acm = func_to_acm(f);
+	int ret;
 
 	if (intf == f_acm->ctrl_id) {
 		return acm_start_ctrl(f_acm, gadget);
 	} else if (intf == f_acm->data_id) {
-		acm_start_data(f_acm, gadget);
+		ret = acm_start_data(f_acm, gadget);
+		if (ret)
+			return ret;
 		f_acm->connected = true;
 		f_acm->tx_on = true;
 		return 0;
