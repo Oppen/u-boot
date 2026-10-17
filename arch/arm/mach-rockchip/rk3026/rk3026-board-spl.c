@@ -536,13 +536,23 @@ static void boox_counter_probe(void)
 }
 #endif
 
+/*
+ * Board pins that must be set first, e.g. a power hold. This runs before
+ * the LED step, so it must not hang.
+ */
+__weak void rk3026_spl_board_init_f(void)
+{
+}
+
 void board_init_f(ulong dummy)
 {
+	rk3026_spl_board_init_f();
+
 	/*
-	 * LED first, before any other peripheral is touched.  It is the only
-	 * output we have, so anything that can hang -- a gated timer block, the
-	 * debug UART -- must come after it, or a hang is indistinguishable from
-	 * the ROM never branching into us.
+	 * LED first after the board hook, before any other peripheral is
+	 * touched.  It is the only output we have, so anything that can hang --
+	 * a gated timer block, the debug UART -- must come after it, or a hang
+	 * is indistinguishable from the ROM never branching into us.
 	 *
 	 * OFF = the mask ROM read the SD card and branched into our SPL.
 	 */

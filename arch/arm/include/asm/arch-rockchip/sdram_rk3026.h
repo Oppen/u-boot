@@ -341,6 +341,9 @@ void sdram_init(void);
 /* get ddr die config, implement in specific board */
 void get_ddr_config(struct rk3026_ddr_config *config);
 
+/* SPL: board pins that must be set first, e.g. a power hold */
+void rk3026_spl_board_init_f(void);
+
 /* get ddr size on board */
 size_t sdram_size(void);
 #endif
