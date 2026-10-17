@@ -17,6 +17,7 @@
  * CFG_SYS_TIMER_COUNTER / CFG_SYS_TIMER_RATE / CONFIG_SYS_TIMER_COUNTS_DOWN.
  */
 
+#include <cpu_func.h>
 #include <debug_uart.h>
 #include <init.h>
 #include <asm/io.h>
@@ -538,6 +539,13 @@ static void boox_counter_probe(void)
 
 void board_init_f(ulong dummy)
 {
+	/*
+	 * L1 D-cache lines survive a warm reset and cpu_init_cp15 does not
+	 * invalidate them; drop them (no clean) before a later stage enables
+	 * the D-cache.
+	 */
+	invalidate_dcache_all();
+
 	/*
 	 * LED first, before any other peripheral is touched.  It is the only
 	 * output we have, so anything that can hang -- a gated timer block, the
