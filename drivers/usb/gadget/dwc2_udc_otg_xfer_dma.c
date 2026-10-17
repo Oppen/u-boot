@@ -763,7 +763,8 @@ static int dwc2_fifo_read(struct dwc2_ep *ep, void *cp, int max)
  */
 static void udc_set_address(struct dwc2_udc *dev, unsigned char address)
 {
-	setbits_le32(&reg->device_regs.dcfg, FIELD_PREP(DCFG_DEVADDR_MASK, address));
+	clrsetbits_le32(&reg->device_regs.dcfg, DCFG_DEVADDR_MASK,
+			FIELD_PREP(DCFG_DEVADDR_MASK, address));
 
 	dwc2_udc_ep0_zlp(dev);
 
