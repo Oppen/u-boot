@@ -272,7 +272,7 @@ static void complete_tx(struct dwc2_udc *dev, u8 ep_num)
 	u32 ep_tsr = 0, xfer_size = 0, is_short = 0;
 	u32 last;
 
-	if (dev->ep0state == WAIT_FOR_NULL_COMPLETE) {
+	if (ep_num == EP0_CON && dev->ep0state == WAIT_FOR_NULL_COMPLETE) {
 		dev->ep0state = WAIT_FOR_OUT_COMPLETE;
 		dwc2_ep0_complete_out();
 		return;
