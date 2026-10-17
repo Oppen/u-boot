@@ -503,6 +503,10 @@ static void __acm_tx(struct f_acm *f_acm)
 		if (!(f_acm->handshake_bits & ACM_CTRL_DTR))
 			break;
 
+		/* not configured (any more): the data waits in tx_buf */
+		if (!f_acm->req_in)
+			break;
+
 		if (!f_acm->tx_on)
 			continue;
 
