@@ -296,6 +296,10 @@ static void acm_rx_complete(struct usb_ep *ep, struct usb_request *req)
 {
 	struct f_acm *f_acm = req->context;
 
+	/* Endpoint disabled: the UDC gave the request back, do not requeue */
+	if (req->status == -ESHUTDOWN)
+		return;
+
 	buf_push(&f_acm->rx_buf, req->buf, req->actual);
 
 	/* Queue RX req again */
