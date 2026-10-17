@@ -11,11 +11,13 @@
 
 #include <circbuf.h>
 #include <console.h>
+#include <env.h>
 #include <errno.h>
 #include <g_dnl.h>
 #include <malloc.h>
 #include <memalign.h>
 #include <stdio_dev.h>
+#include <time.h>
 #include <version.h>
 #include <watchdog.h>
 
@@ -629,6 +631,7 @@ static void acm_stdio_puts(struct stdio_dev *dev, const char *str)
 static int acm_stdio_start(struct stdio_dev *dev)
 {
 	struct udevice *udc;
+	ulong start, wait;
 	int ret;
 
 	if (dev->priv) { /* function already exist */
@@ -646,6 +649,13 @@ static int acm_stdio_start(struct stdio_dev *dev)
 	ret = g_dnl_register("usb_serial_acm");
 	if (ret)
 		return ret;
+
+	/*
+	 * Wait up to usbacm_wait ms (unset or 0: for ever) for a host to
+	 * configure the device; output stays buffered until then.
+	 */
+	wait = env_get_ulong("usbacm_wait", 10, 0);
+	start = get_timer(0);
 
 	if (default_acm_function)
 		dev->priv = default_acm_function;
@@ -665,6 +675,8 @@ static int acm_stdio_start(struct stdio_dev *dev)
 	while (!acm_connected(dev)) {
 		if (ctrlc())
 			return -ECANCELED;
+		if (wait && get_timer(start) >= wait)
+			break;
 
 		schedule();
 	}

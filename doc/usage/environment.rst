@@ -405,6 +405,15 @@ usb_ignorelist
     by a colon. '*' functions as a wildcard for idProduct to block all devices
     with the specified idVendor.
 
+usbacm_wait
+    Time in milliseconds to wait for a host to configure the USB CDC ACM
+    gadget when usbacm becomes a console device (stdin, stdout or stderr).
+    When the time is up, U-Boot goes on; the last 2 KiB of console output
+    to usbacm are kept until a host configures the device. A host that
+    connects later is only picked up while usbacm is also in stdin and the
+    console polls it. If unset or 0, U-Boot waits until a host configures
+    the device or Ctrl-C is pressed on another console.
+
 vlan
     When set to a value < 4095 the traffic over
     Ethernet is encapsulated/received over 802.1q
