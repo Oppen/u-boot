@@ -13,6 +13,16 @@ config TARGET_BOOX_C67ML
 	  Cortex-A9, 512 MB DDR3, 4 GB raw NAND (closed FTL, unusable by
 	  mainline), microSD, E Ink display.
 
+config TARGET_BOOX_RC2
+	bool "ONYX BOOX Robinson Crusoe 2"
+	select BOARD_LATE_INIT
+	help
+	  Support for the ONYX BOOX Robinson Crusoe 2 (MC_Kepler_R2) 6"
+	  e-reader. RK3026 dual-core Cortex-A9, 512 MiB DDR3, eMMC with the
+	  vendor firmware (not described, never probed), microSD, E Ink
+	  display. Boots from the microSD card like the C67ML: the SPL
+	  brings up DDR, the mask ROM loads U-Boot proper.
+
 endchoice
 
 config ROCKCHIP_BOOT_MODE_REG
@@ -58,5 +68,6 @@ config SPL_SERIAL
 	default y
 
 source "board/rockchip/boox-c67ml/Kconfig"
+source "board/rockchip/boox-rc2/Kconfig"
 
 endif
