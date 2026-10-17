@@ -27,15 +27,24 @@ struct designware_wdt_priv {
 /*
  * Set the watchdog time interval.
  * Counter is 32 bit.
+ * TOP i gives a period of 2^(16 + i) clock cycles, i = 0..15; pick the
+ * shortest period that is not shorter than the timeout, or the longest one.
  */
 static int designware_wdt_settimeout(void __iomem *base, unsigned int clk_khz,
-				     unsigned int timeout)
+				     u64 timeout)
 {
-	signed int i;
+	u64 cycles;
+	int i;
 
 	/* calculate the timeout range value */
-	i = fls(timeout * clk_khz - 1) - 16;
-	i = clamp(i, 0, 15);
+	if (timeout >= BIT_ULL(31)) {
+		/* at least 2^31 cycles (TOP 15) at any clock */
+		i = 15;
+	} else {
+		cycles = timeout * clk_khz;
+		i = cycles ? fls64(cycles - 1) - 16 : 0;
+		i = clamp(i, 0, 15);
+	}
 
 	writel(i | (i << 4), base + DW_WDT_TORR);
 
