@@ -134,8 +134,25 @@ static int setdma_tx(struct dwc2_ep *ep, struct dwc2_request *req)
 	buf = req->req.buf + req->req.actual;
 	length = req->req.length - req->req.actual;
 
-	if (ep_num == EP0_CON)
+	if (ep_num == EP0_CON) {
 		length = min(length, (u32)ep_maxpacket(ep));
+	} else {
+		/*
+		 * whole packets, at most DMA_BUFFER_SIZE and what PktCnt
+		 * holds, and a multiple of 4 bytes: the next chunk's DIEPDMA
+		 * must be word aligned
+		 */
+		u32 mps = ep_maxpacket(ep);
+		u32 pkts = min_t(u32, DMA_BUFFER_SIZE / mps,
+				 FIELD_MAX(DXEPTSIZ_PKTCNT_MASK));
+
+		if (mps & 1)
+			pkts &= ~3;
+		else if (mps & 2)
+			pkts &= ~1;
+
+		length = min(length, pkts * mps);
+	}
 
 	ep->len = length;
 	ep->dma_buf = buf;
