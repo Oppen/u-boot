@@ -29,6 +29,9 @@
 
 #define REQ_SIZE_MAX	512
 
+/* longest wait for the host to take an IN request while it holds DTR */
+#define ACM_TX_TIMEOUT_MS	1000
+
 struct f_acm {
 	int ctrl_id;
 	int data_id;
@@ -42,6 +45,7 @@ struct f_acm {
 
 	bool connected;
 	bool tx_on;
+	bool tx_stalled;	/* an IN request timed out, not completed yet */
 
 	circbuf_t rx_buf;
 	circbuf_t tx_buf;
@@ -290,6 +294,7 @@ static void acm_tx_complete(struct usb_ep *ep, struct usb_request *req)
 	struct f_acm *f_acm = req->context;
 
 	f_acm->tx_on = true;
+	f_acm->tx_stalled = false;
 }
 
 static void acm_rx_complete(struct usb_ep *ep, struct usb_request *req)
@@ -495,6 +500,7 @@ static struct usb_gadget_strings *acm_strings[] = {
 
 static void __acm_tx(struct f_acm *f_acm)
 {
+	ulong start = get_timer(0);
 	int len, ret;
 
 	do {
@@ -507,8 +513,16 @@ static void __acm_tx(struct f_acm *f_acm)
 		if (!f_acm->req_in)
 			break;
 
-		if (!f_acm->tx_on)
+		/* A host holding DTR without reading must not hang U-Boot */
+		if (!f_acm->tx_on) {
+			if (f_acm->tx_stalled)
+				break;
+			if (get_timer(start) >= ACM_TX_TIMEOUT_MS) {
+				f_acm->tx_stalled = true;
+				break;
+			}
 			continue;
+		}
 
 		len = buf_pop(&f_acm->tx_buf, f_acm->req_in->buf, REQ_SIZE_MAX);
 		if (!len)
@@ -521,6 +535,7 @@ static void __acm_tx(struct f_acm *f_acm)
 			break;
 
 		f_acm->tx_on = false;
+		start = get_timer(0);
 
 		/* Do not reset the watchdog, if TX is stuck there is probably
 		 * a real issue.
