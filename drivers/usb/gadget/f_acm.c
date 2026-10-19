@@ -11,11 +11,13 @@
 
 #include <circbuf.h>
 #include <console.h>
+#include <env.h>
 #include <errno.h>
 #include <g_dnl.h>
 #include <malloc.h>
 #include <memalign.h>
 #include <stdio_dev.h>
+#include <time.h>
 #include <version.h>
 #include <watchdog.h>
 
@@ -26,6 +28,9 @@
 #include <boox_probe.h>
 
 #define REQ_SIZE_MAX	512
+
+/* longest wait for the host to take an IN request while it holds DTR */
+#define ACM_TX_TIMEOUT_MS	1000
 
 struct f_acm {
 	int ctrl_id;
@@ -40,6 +45,7 @@ struct f_acm {
 
 	bool connected;
 	bool tx_on;
+	bool tx_stalled;	/* an IN request timed out, not completed yet */
 
 	circbuf_t rx_buf;
 	circbuf_t tx_buf;
@@ -288,11 +294,16 @@ static void acm_tx_complete(struct usb_ep *ep, struct usb_request *req)
 	struct f_acm *f_acm = req->context;
 
 	f_acm->tx_on = true;
+	f_acm->tx_stalled = false;
 }
 
 static void acm_rx_complete(struct usb_ep *ep, struct usb_request *req)
 {
 	struct f_acm *f_acm = req->context;
+
+	/* Endpoint disabled: the UDC gave the request back, do not requeue */
+	if (req->status == -ESHUTDOWN)
+		return;
 
 	buf_push(&f_acm->rx_buf, req->buf, req->actual);
 
@@ -336,6 +347,8 @@ static int acm_start_data(struct f_acm *f_acm, struct usb_gadget *gadget)
 		return ret;
 
 	f_acm->req_in = acm_start_ep(f_acm->ep_in, acm_tx_complete, f_acm);
+	if (!f_acm->req_in)
+		return -ENOMEM;
 
 	/* EP OUT */
 	d = ep_desc(gadget, &acm_hs_out_desc, &acm_fs_out_desc);
@@ -344,6 +357,8 @@ static int acm_start_data(struct f_acm *f_acm, struct usb_gadget *gadget)
 		return ret;
 
 	f_acm->req_out = acm_start_ep(f_acm->ep_out, acm_rx_complete, f_acm);
+	if (!f_acm->req_out)
+		return -ENOMEM;
 
 	/* Start OUT transfer (EP OUT) */
 	ret = usb_ep_queue(f_acm->ep_out, f_acm->req_out, 0);
@@ -371,11 +386,14 @@ static int acm_set_alt(struct usb_function *f, unsigned int intf, unsigned int a
 {
 	struct usb_gadget *gadget = f->config->cdev->gadget;
 	struct f_acm *f_acm = func_to_acm(f);
+	int ret;
 
 	if (intf == f_acm->ctrl_id) {
 		return acm_start_ctrl(f_acm, gadget);
 	} else if (intf == f_acm->data_id) {
-		acm_start_data(f_acm, gadget);
+		ret = acm_start_data(f_acm, gadget);
+		if (ret)
+			return ret;
 		f_acm->connected = true;
 		f_acm->tx_on = true;
 		return 0;
@@ -489,6 +507,7 @@ static struct usb_gadget_strings *acm_strings[] = {
 
 static void __acm_tx(struct f_acm *f_acm)
 {
+	ulong start = get_timer(0);
 	int len, ret;
 
 	do {
@@ -497,8 +516,20 @@ static void __acm_tx(struct f_acm *f_acm)
 		if (!(f_acm->handshake_bits & ACM_CTRL_DTR))
 			break;
 
-		if (!f_acm->tx_on)
+		/* not configured (any more): the data waits in tx_buf */
+		if (!f_acm->req_in)
+			break;
+
+		/* A host holding DTR without reading must not hang U-Boot */
+		if (!f_acm->tx_on) {
+			if (f_acm->tx_stalled)
+				break;
+			if (get_timer(start) >= ACM_TX_TIMEOUT_MS) {
+				f_acm->tx_stalled = true;
+				break;
+			}
 			continue;
+		}
 
 		len = buf_pop(&f_acm->tx_buf, f_acm->req_in->buf, REQ_SIZE_MAX);
 		if (!len)
@@ -511,6 +542,7 @@ static void __acm_tx(struct f_acm *f_acm)
 			break;
 
 		f_acm->tx_on = false;
+		start = get_timer(0);
 
 		/* Do not reset the watchdog, if TX is stuck there is probably
 		 * a real issue.
@@ -629,6 +661,7 @@ static void acm_stdio_puts(struct stdio_dev *dev, const char *str)
 static int acm_stdio_start(struct stdio_dev *dev)
 {
 	struct udevice *udc;
+	ulong start, wait;
 	int ret;
 
 	if (dev->priv) { /* function already exist */
@@ -646,6 +679,13 @@ static int acm_stdio_start(struct stdio_dev *dev)
 	ret = g_dnl_register("usb_serial_acm");
 	if (ret)
 		return ret;
+
+	/*
+	 * Wait up to usbacm_wait ms (unset or 0: for ever) for a host to
+	 * configure the device; output stays buffered until then.
+	 */
+	wait = env_get_ulong("usbacm_wait", 10, 0);
+	start = get_timer(0);
 
 	if (default_acm_function)
 		dev->priv = default_acm_function;
@@ -665,6 +705,8 @@ static int acm_stdio_start(struct stdio_dev *dev)
 	while (!acm_connected(dev)) {
 		if (ctrlc())
 			return -ECANCELED;
+		if (wait && get_timer(start) >= wait)
+			break;
 
 		schedule();
 	}
