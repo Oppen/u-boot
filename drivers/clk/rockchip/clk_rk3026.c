@@ -465,6 +465,7 @@ static ulong rk3026_clk_get_rate(struct clk *clk)
 	case PCLK_I2C1:
 	case PCLK_I2C2:
 	case PCLK_I2C3:
+	case PCLK_WDT:
 		return rk3026_peri_get_rate(priv->cru,
 					    rkclk_pll_get_rate(priv->cru,
 							       CLK_GENERAL),
@@ -560,6 +561,8 @@ static const struct rk3026_gate rk3026_gates[] = {
 	 * id in dt-bindings/clock/rk3026-cru.h, so they cannot be requested. */
 	{ PCLK_TIMER0,	1, { { 7, 7 } } },
 	{ PCLK_TIMER1,	1, { { 7, 8 } } },
+
+	{ PCLK_WDT,	1, { { 7, 15 } } },
 
 	{ PCLK_GPIO0,	1, { { 8, 9 } } },
 	{ PCLK_GPIO1,	1, { { 8, 10 } } },
