@@ -19,6 +19,7 @@
 #include <asm/arch-rockchip/cru_rk3026.h>
 #include <asm/arch-rockchip/grf_rk3026.h>
 #include <asm/arch-rockchip/hardware.h>
+#include <asm/arch-rockchip/qos_rk3026.h>
 #include <linux/err.h>
 
 #define GRF_BASE	0x20008000
@@ -66,6 +67,33 @@ static void step11_blink_forever(void)
 		for (i = 0; i < STEP11_SPIN; i++)
 			;
 	}
+}
+#endif
+
+#ifndef CONFIG_XPL_BUILD
+/*
+ * After a power-on the CPU-side QoS priorities read CPU0 0x8, CPU1W/CPU1R
+ * 0xf and PERI 0x4: the CPU cluster's DRAM traffic then outranks the
+ * display fetch, and the EBC (E-Ink) controller underruns under CPU memory
+ * load. The vendor kernel's cpu_axi_init() sets these four ports to the
+ * lowest priority; a warm reset keeps whatever ran before, a power-on does
+ * not, so set them on every boot. The QoS blocks from 0x1012d000 up (GPU,
+ * VPU, VIO: LCDC/EBC) can be clock- or power-gated (reads hung under the
+ * vendor kernel) and are left to the kernel.
+ */
+static void rk3026_qos_init(void)
+{
+	writel(0, (void __iomem *)(CPU0_QOS + CPU_AXI_QOS_PRIORITY));
+	writel(0, (void __iomem *)(CPU1W_QOS + CPU_AXI_QOS_PRIORITY));
+	writel(0, (void __iomem *)(CPU1R_QOS + CPU_AXI_QOS_PRIORITY));
+	writel(0, (void __iomem *)(PERI_QOS + CPU_AXI_QOS_PRIORITY));
+}
+
+int arch_cpu_init(void)
+{
+	rk3026_qos_init();
+
+	return 0;
 }
 #endif
 
