@@ -319,6 +319,8 @@ int dwc2_flush_rx_fifo(struct dwc2_core_regs *regs);
 #define GHWCFG2_OP_MODE_NO_SRP_CAPABLE_HOST	6
 #define GHWCFG2_OP_MODE_UNDEFINED		7
 
+#define GHWCFG3_DFIFO_DEPTH_MASK		GENMASK(31, 16)
+
 #define GHWCFG4_DESC_DMA_DYN			BIT(31)
 #define GHWCFG4_DESC_DMA			BIT(30)
 #define GHWCFG4_NUM_IN_EPS_MASK			GENMASK(29, 26)

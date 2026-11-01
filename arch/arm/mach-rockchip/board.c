@@ -240,6 +240,24 @@ static struct dwc2_plat_otg_data otg_data = {
 	.tx_fifo_sz	= 128,
 };
 
+/* FIFO sizes from the DT node, as dwc2_udc_otg_of_to_plat() reads them */
+static void rockchip_otg_fifo_sizes(ofnode node)
+{
+	int n;
+
+	otg_data.rx_fifo_sz = ofnode_read_u32_default(node, "g-rx-fifo-size",
+						      otg_data.rx_fifo_sz);
+	otg_data.np_tx_fifo_sz = ofnode_read_u32_default(node, "g-np-tx-fifo-size",
+							 otg_data.np_tx_fifo_sz);
+	n = ofnode_read_size(node, "g-tx-fifo-size");
+	if (n <= 0)
+		return;
+	n = min_t(int, n / sizeof(u32), DWC2_MAX_HW_ENDPOINTS);
+	if (!ofnode_read_u32_array(node, "g-tx-fifo-size",
+				   otg_data.tx_fifo_sz_array, n))
+		otg_data.tx_fifo_sz_nb = n;
+}
+
 int board_usb_init(int index, enum usb_init_type init)
 {
 	ofnode node;
@@ -268,6 +286,7 @@ int board_usb_init(int index, enum usb_init_type init)
 		return -ENODEV;
 	}
 	otg_data.regs_otg = ofnode_get_addr(node);
+	rockchip_otg_fifo_sizes(node);
 
 #ifdef CONFIG_ROCKCHIP_USB2_PHY
 	int ret;

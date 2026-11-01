@@ -134,8 +134,25 @@ static int setdma_tx(struct dwc2_ep *ep, struct dwc2_request *req)
 	buf = req->req.buf + req->req.actual;
 	length = req->req.length - req->req.actual;
 
-	if (ep_num == EP0_CON)
+	if (ep_num == EP0_CON) {
 		length = min(length, (u32)ep_maxpacket(ep));
+	} else {
+		/*
+		 * whole packets, at most DMA_BUFFER_SIZE and what PktCnt
+		 * holds, and a multiple of 4 bytes: the next chunk's DIEPDMA
+		 * must be word aligned
+		 */
+		u32 mps = ep_maxpacket(ep);
+		u32 pkts = min_t(u32, DMA_BUFFER_SIZE / mps,
+				 FIELD_MAX(DXEPTSIZ_PKTCNT_MASK));
+
+		if (mps & 1)
+			pkts &= ~3;
+		else if (mps & 2)
+			pkts &= ~1;
+
+		length = min(length, pkts * mps);
+	}
 
 	ep->len = length;
 	ep->dma_buf = buf;
@@ -255,7 +272,7 @@ static void complete_tx(struct dwc2_udc *dev, u8 ep_num)
 	u32 ep_tsr = 0, xfer_size = 0, is_short = 0;
 	u32 last;
 
-	if (dev->ep0state == WAIT_FOR_NULL_COMPLETE) {
+	if (ep_num == EP0_CON && dev->ep0state == WAIT_FOR_NULL_COMPLETE) {
 		dev->ep0state = WAIT_FOR_OUT_COMPLETE;
 		dwc2_ep0_complete_out();
 		return;
@@ -456,6 +473,53 @@ static void process_ep_out_intr(struct dwc2_udc *dev)
 }
 
 /*
+ * USB bus reset: keep the core configuration and FIFO layout from
+ * udc_enable(), clear the device address, stop and deactivate the
+ * non-control endpoints, drop pending endpoint interrupts and flush the
+ * FIFOs.
+ */
+static void dwc2_udc_bus_reset(struct dwc2_udc *dev)
+{
+	int i;
+
+	clrbits_le32(&reg->device_regs.dcfg, DCFG_DEVADDR_MASK);
+	dev->usb_address = 0;
+
+	for (i = 0; i < DWC2_MAX_ENDPOINTS; i++) {
+		u32 doepctl = readl(&reg->device_regs.out_endp[i].doepctl);
+		u32 diepctl = readl(&reg->device_regs.in_endp[i].diepctl);
+
+		/*
+		 * EP0 stays enabled; other endpoints stop, drop STALL and
+		 * stay inactive until set_alt activates them again
+		 */
+		if (i) {
+			if (doepctl & DXEPCTL_EPENA)
+				doepctl |= DXEPCTL_EPDIS;
+			if (diepctl & DXEPCTL_EPENA)
+				diepctl |= DXEPCTL_EPDIS;
+			doepctl &= ~(DXEPCTL_USBACTEP | DXEPCTL_STALL);
+			diepctl &= ~(DXEPCTL_USBACTEP | DXEPCTL_STALL);
+		}
+		writel(doepctl | DXEPCTL_SNAK, &reg->device_regs.out_endp[i].doepctl);
+		writel(diepctl | DXEPCTL_SNAK, &reg->device_regs.in_endp[i].diepctl);
+
+		/* drop endpoint events from before the reset */
+		writel(readl(&reg->device_regs.out_endp[i].doepint),
+		       &reg->device_regs.out_endp[i].doepint);
+		writel(readl(&reg->device_regs.in_endp[i].diepint),
+		       &reg->device_regs.in_endp[i].diepint);
+	}
+
+	dwc2_flush_tx_fifo(reg, GRSTCTL_TXFNUM_ALL);
+	dwc2_flush_rx_fifo(reg);
+
+	writel(FIELD_PREP(DAINT_OUTEP_MASK, BIT(EP0_CON)) |
+	       FIELD_PREP(DAINT_INEP_MASK, BIT(EP0_CON)),
+	       &reg->device_regs.daintmsk);
+}
+
+/*
  *	usb client interrupt handler.
  */
 static int dwc2_udc_irq(int irq, void *_dev)
@@ -554,19 +618,10 @@ static int dwc2_udc_irq(int irq, void *_dev)
 		writel(GINTSTS_USBRST, &reg->global_regs.gintsts);
 
 		if (usb_status & (GOTGCTL_ASESVLD | GOTGCTL_BSESVLD)) {
-			if (reset_available) {
-				debug_cond(DEBUG_ISR,
-					"\t\tOTG core got reset (%d)!!\n",
-					reset_available);
-				reconfig_usbd(dev);
-				dev->ep0state = WAIT_FOR_SETUP;
-				reset_available = 0;
-				dwc2_udc_pre_setup();
-			} else
-				reset_available = 1;
-
+			dwc2_udc_bus_reset(dev);
+			dev->ep0state = WAIT_FOR_SETUP;
+			dwc2_udc_pre_setup();
 		} else {
-			reset_available = 1;
 			debug_cond(DEBUG_ISR,
 				   "\t\tRESET handling skipped\n");
 		}
@@ -746,7 +801,8 @@ static int dwc2_fifo_read(struct dwc2_ep *ep, void *cp, int max)
  */
 static void udc_set_address(struct dwc2_udc *dev, unsigned char address)
 {
-	setbits_le32(&reg->device_regs.dcfg, FIELD_PREP(DCFG_DEVADDR_MASK, address));
+	clrsetbits_le32(&reg->device_regs.dcfg, DCFG_DEVADDR_MASK,
+			FIELD_PREP(DCFG_DEVADDR_MASK, address));
 
 	dwc2_udc_ep0_zlp(dev);
 
@@ -1348,9 +1404,6 @@ static void dwc2_ep0_setup(struct dwc2_udc *dev)
 				   "%s: USB_REQ_SET_CONFIGURATION (%d)\n",
 				   __func__, usb_ctrl->wValue);
 
-			if (usb_ctrl->bRequestType == USB_RECIP_DEVICE)
-				reset_available = 1;
-
 			break;
 
 		case USB_REQ_GET_DESCRIPTOR:
@@ -1363,9 +1416,6 @@ static void dwc2_ep0_setup(struct dwc2_udc *dev)
 			debug_cond(DEBUG_SETUP != 0,
 				   "%s: *** USB_REQ_SET_INTERFACE (%d)\n",
 				   __func__, usb_ctrl->wValue);
-
-			if (usb_ctrl->bRequestType == USB_RECIP_INTERFACE)
-				reset_available = 1;
 
 			break;
 

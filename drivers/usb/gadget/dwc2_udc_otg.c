@@ -88,7 +88,6 @@ static const char ep0name[] = "ep0-control";
 static unsigned int ep0_fifo_size = 64;
 static unsigned int ep_fifo_size =  512;
 static unsigned int ep_fifo_size2 = 1024;
-static int reset_available = 1;
 
 static struct usb_ctrlrequest *usb_ctrl;
 static dma_addr_t usb_ctrl_dma_addr;
@@ -467,7 +466,7 @@ static void reconfig_usbd(struct dwc2_udc *dev)
 	int i;
 	u32 dflt_gusbcfg;
 	u32 rx_fifo_sz, tx_fifo_sz, np_tx_fifo_sz;
-	u32 max_hw_ep;
+	u32 max_hw_ep, fifo_addr, fifo_depth;
 	int pdata_hw_ep;
 
 	dwc2_core_reset(reg);
@@ -560,15 +559,24 @@ static void reconfig_usbd(struct dwc2_udc *dev)
 		pr_warn("Got %d hw endpoint but %d tx-fifo-size in array !!\n",
 			max_hw_ep, pdata_hw_ep);
 
+	/* the IN FIFOs follow each other; their depths may differ */
+	fifo_addr = rx_fifo_sz + np_tx_fifo_sz;
 	for (i = 0; i < max_hw_ep; i++) {
 		if (pdata_hw_ep)
 			tx_fifo_sz = dev->pdata->tx_fifo_sz_array[i];
 
 		writel(FIELD_PREP(FIFOSIZE_DEPTH_MASK, tx_fifo_sz) |
-		       FIELD_PREP(FIFOSIZE_STARTADDR_MASK,
-				  rx_fifo_sz + np_tx_fifo_sz + tx_fifo_sz * i),
+		       FIELD_PREP(FIFOSIZE_STARTADDR_MASK, fifo_addr),
 		       &reg->global_regs.dptxfsizn[i]);
+		fifo_addr += tx_fifo_sz;
 	}
+
+	fifo_depth = FIELD_GET(GHWCFG3_DFIFO_DEPTH_MASK,
+			       readl(&reg->global_regs.ghwcfg3));
+	if (fifo_depth && fifo_addr > fifo_depth)
+		pr_warn("FIFOs need %u words, the core has %u\n",
+			fifo_addr, fifo_depth);
+
 	/* Flush the RX FIFO */
 	dwc2_flush_rx_fifo(reg);
 
