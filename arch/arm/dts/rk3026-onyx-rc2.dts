@@ -1,0 +1,150 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * ONYX BOOX Robinson Crusoe 2 (MC_Kepler_R2, pcb V1.73), RK3026, 512 MiB DDR3.
+ *
+ * The NAND controller's pads are the eMMC data lines; eMMC, NAND and SDIO
+ * are not used. The microSD slot is the only block device.
+ * Power: no PMIC and no regulator is described; the I2C buses stay
+ * disabled.
+ */
+
+/dts-v1/;
+#include "rk3026.dtsi"
+#include <dt-bindings/input/input.h>
+
+/delete-node/ &emmc;
+/delete-node/ &nfc;
+/delete-node/ &sdio;
+
+/ {
+	model = "Onyx Boox Robinson Crusoe 2";
+	compatible = "onyx,rc2", "rockchip,rk3026";
+
+	aliases {
+		mmc0 = &sdmmc;
+	};
+
+	chosen {
+		stdout-path = "serial2:115200n8";
+	};
+
+	memory@60000000 {
+		device_type = "memory";
+		reg = <0x60000000 0x20000000>; /* 512 MiB */
+	};
+
+	/* Top 1 MiB: E Ink waveform, ramoops and a loader log page */
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		waveform@7ff00000 {
+			reg = <0x7ff00000 0x40000>;
+			no-map;
+		};
+
+		ramoops@7ff40000 {
+			compatible = "ramoops";
+			reg = <0x7ff40000 0x80000>;
+			console-size = <0x40000>;
+			record-size = <0x20000>;
+		};
+
+		loader-log@7ffc0000 {
+			reg = <0x7ffc0000 0x40000>;
+			no-map;
+		};
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		key-power {
+			label = "Power";
+			gpios = <&gpio1 RK_PA4 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_POWER>;
+		};
+
+		key-pageup {
+			label = "Page Up";
+			gpios = <&gpio2 RK_PB5 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_PAGEUP>;
+		};
+
+		key-pagedown {
+			label = "Page Down";
+			gpios = <&gpio2 RK_PB6 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_PAGEDOWN>;
+		};
+
+		key-back {
+			label = "Back";
+			gpios = <&gpio2 RK_PC3 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_BACK>;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		led-0 {
+			label = "status";
+			gpios = <&gpio2 RK_PB7 GPIO_ACTIVE_HIGH>;
+		};
+	};
+};
+
+&gpio1 {
+	/*
+	 * Power hold: the PMIC drops the rails when the power key is released
+	 * unless this line is high.
+	 */
+	power-hold-hog {
+		gpio-hog;
+		gpios = <RK_PA2 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "power_hold";
+	};
+};
+
+&pinctrl {
+	sdmmc {
+		/* on eMMC boards the card detect is GPIO2_A3, not GPIO1_C1 */
+		sdmmc_cd_gpio: sdmmc-cd-gpio {
+			rockchip,pins = <2 RK_PA3 RK_FUNC_GPIO &pcfg_pull_default>;
+		};
+	};
+};
+
+&sdmmc {
+	bus-width = <4>;
+	cap-sd-highspeed;
+	max-frequency = <25000000>;
+	cd-gpios = <&gpio2 RK_PA3 GPIO_ACTIVE_LOW>;
+	disable-wp;
+	fifo-mode;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdmmc_clk &sdmmc_cmd &sdmmc_bus4 &sdmmc_cd_gpio>;
+	status = "okay";
+};
+
+/*
+ * UART2 (GPIO2_C6/C7) has no known connector on this board: the block is
+ * enabled as the "serial" console device but its pins are never muxed.
+ * The console is the USB CDC-ACM gadget.
+ */
+&uart2 {
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+	status = "okay";
+};
+
+&usbphy {
+	status = "okay";
+};
+
+&usb_otg {
+	dr_mode = "peripheral";
+	status = "okay";
+};

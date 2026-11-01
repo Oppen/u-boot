@@ -1,0 +1,52 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * U-Boot additions for the ONYX BOOX Robinson Crusoe 2. The SPL is
+ * back-to-BROM and uses no driver model, so the bootph tags only matter
+ * for the pre-relocation probing of U-Boot proper.
+ */
+#include "rockchip-u-boot.dtsi"
+
+&cru {
+	bootph-all;
+};
+
+&grf {
+	bootph-all;
+};
+
+&xin24m {
+	bootph-all;
+};
+
+&uart2 {
+	bootph-all;
+	clock-frequency = <24000000>;
+};
+
+&sdmmc {
+	/*
+	 * No bootph tag: nothing uses the card before relocation.
+	 *
+	 * No DM GPIO driver is built, so cd-gpios cannot be read: the card
+	 * we booted from is present, poll instead of trusting the pin.
+	 */
+	broken-cd;
+	/delete-property/ cd-gpios;
+};
+
+&{/timer@20044000} {
+	clock-frequency = <24000000>;
+};
+
+&{/timer@20044020} {
+	clock-frequency = <24000000>;
+};
+
+&{/chosen} {
+	tick-timer = &global_timer;
+};
+
+&global_timer {
+	bootph-all;
+	status = "okay";
+};

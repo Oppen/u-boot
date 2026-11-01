@@ -153,8 +153,10 @@
  *
  * GRF_OS_REG0..5 (0x200081c8..0x200081dc) are Rockchip's cross-stage scratch
  * words -- the vendor DDR blob parks capability info in the low ones and
- * OS_REG5 is the boot-mode register, so 2/3/4 are free. They need no DRAM, no
- * relocation-safe address, and they survive SPL -> BROM -> U-Boot proper.
+ * OS_REG5 is the boot-mode register, so 2/3/4 are free, except that the vendor
+ * loader reads OS_REG4 as its reboot mode (hence RK3026_SPL_TIMER_STASH).
+ * They need no DRAM, no relocation-safe address, and they survive
+ * SPL -> BROM -> U-Boot proper.
  * (GRF *is* cleared by U-Boot's own `reset`, which does not happen in between.)
  *
  * The first attempt used DRAM at 0x60f00000 and the magic never arrived, even
@@ -255,6 +257,9 @@ void rockchip_stimer_init(void)
 
 	if (b == a)
 		return;			/* not advancing: leave the spin path selected */
+
+	if (!IS_ENABLED(CONFIG_RK3026_SPL_TIMER_STASH))
+		return;			/* the measurement is only reported */
 
 	/*
 	 * Kept as a REPORT, not as a rate the delays use: lib/time.c takes
@@ -536,13 +541,23 @@ static void boox_counter_probe(void)
 }
 #endif
 
+/*
+ * Board pins that must be set first, e.g. a power hold. This runs before
+ * the LED step, so it must not hang.
+ */
+__weak void rk3026_spl_board_init_f(void)
+{
+}
+
 void board_init_f(ulong dummy)
 {
+	rk3026_spl_board_init_f();
+
 	/*
-	 * LED first, before any other peripheral is touched.  It is the only
-	 * output we have, so anything that can hang -- a gated timer block, the
-	 * debug UART -- must come after it, or a hang is indistinguishable from
-	 * the ROM never branching into us.
+	 * LED first after the board hook, before any other peripheral is
+	 * touched.  It is the only output we have, so anything that can hang --
+	 * a gated timer block, the debug UART -- must come after it, or a hang
+	 * is indistinguishable from the ROM never branching into us.
 	 *
 	 * OFF = the mask ROM read the SD card and branched into our SPL.
 	 */
@@ -559,7 +574,8 @@ void board_init_f(ulong dummy)
 	rockchip_stimer_init();
 
 	/* GRF scratch, so this needs no DRAM and survives a failed sdram_init(). */
-	spl_gt_stash();
+	if (IS_ENABLED(CONFIG_RK3026_SPL_TIMER_STASH))
+		spl_gt_stash();
 
 	/* 3: the timer block answered and the liveness probe finished. */
 	BOOX_STEP(3);

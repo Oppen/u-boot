@@ -1,0 +1,12 @@
+if TARGET_BOOX_RC2
+
+config SYS_BOARD
+	default "boox-rc2"
+
+config SYS_VENDOR
+	default "rockchip"
+
+config SYS_CONFIG_NAME
+	default "boox_rc2"
+
+endif

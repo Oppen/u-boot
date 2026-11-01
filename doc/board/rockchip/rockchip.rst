@@ -28,6 +28,9 @@ List of mainline supported Rockchip boards:
      - Engicam PX30.Core EDIMM2.2 Starter Kit (px30-core-edimm2.2-px30)
      - Firefly Core-PX30-JD4 (firefly-px30)
      - Theobroma Systems PX30-µQ7 SoM - Ringneck (ringneck-px30)
+* rk3026
+     - ONYX BOOX C67ML Magellan (boox_c67ml)
+     - ONYX BOOX Robinson Crusoe 2 (boox_rc2)
 * rk3036
      - Rockchip Evb-RK3036 (evb-rk3036)
      - Kylin (kylin_rk3036)

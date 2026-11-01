@@ -1,0 +1,8 @@
+BOOX-RC2
+M:	Sergei Khomenkov <shomenkow@gmail.com>
+S:	Maintained
+F:	board/rockchip/boox-rc2
+F:	include/configs/boox_rc2.h
+F:	configs/boox_rc2_defconfig
+F:	arch/arm/dts/rk3026-onyx-rc2.dts
+F:	arch/arm/dts/rk3026-onyx-rc2-u-boot.dtsi
